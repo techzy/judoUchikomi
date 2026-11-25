@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Uchikomi">
+<meta name="theme-color" content="#0b0d10">
+<title>Uchikomi Coach</title>
+<style>
+  :root {
+    --bg: #0b0d10; --panel: #151920; --line: #262c36; --text: #eef1f5; --muted: #8b95a5;
+    --accent: #3d8bfd; --good: #2fbf71; --mid: #f0b429; --bad: #ef5350;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .hidden { display: none !important; }
+  .screen { min-height: 100%; padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 24px); }
+  h1 { font-size: 28px; margin: 8px 0 2px; }
+  h2 { font-size: 20px; margin: 24px 0 8px; }
+  p.sub { color: var(--muted); margin: 0 0 20px; }
+  button, .btn { display: block; width: 100%; padding: 16px; margin: 10px 0; border: 0; border-radius: 14px;
+    background: var(--panel); color: var(--text); font-size: 17px; font-weight: 600; text-align: center; }
+  button.primary { background: var(--accent); }
+  button.danger { background: #3a1517; color: #ffb4b0; }
+  button.small { display: inline-block; width: auto; padding: 8px 12px; margin: 4px 4px 4px 0; font-size: 14px; border-radius: 10px; }
+  .row { display: flex; gap: 10px; } .row > * { flex: 1; }
+  .card { background: var(--panel); border-radius: 14px; padding: 14px; margin: 10px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .topbar { display: flex; align-items: center; gap: 10px; }
+  .topbar button { width: auto; margin: 0; padding: 10px 14px; }
+  label.field { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  label.field span small { display: block; color: var(--muted); font-size: 13px; }
+  select, input[type=number] { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-size: 16px; max-width: 150px; }
+  input[type=checkbox] { width: 24px; height: 24px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { font-size: 12px; padding: 4px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+  .chip.g { border-color: var(--good); color: #a8efc6; } .chip.m { border-color: var(--mid); color: #ffe199; } .chip.b { border-color: var(--bad); color: #ffb4b0; }
+  .score { font-weight: 800; font-size: 22px; }
+  .s-g { color: var(--good); } .s-m { color: var(--mid); } .s-b { color: var(--bad); }
+
+  /* Drill screen */
+  #drill { padding: 0; position: fixed; inset: 0; background: #000; }
+  .stage { position: absolute; inset: 0; }
+  .stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .mirror { transform: scaleX(-1); }
+  .hud { position: absolute; left: 0; right: 0; top: 0; padding: calc(env(safe-area-inset-top) + 10px) 14px 10px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    background: linear-gradient(#000c, #0000); pointer-events: none; }
+  .hud .big { font-size: 44px; font-weight: 800; line-height: 1; }
+  .hud .lbl { font-size: 12px; color: #cfd6e0; text-transform: uppercase; letter-spacing: .08em; }
+  .hud .right { text-align: right; }
+  #debug { position: absolute; left: 14px; top: calc(env(safe-area-inset-top) + 80px); font: 12px/1.35 ui-monospace, Menlo, monospace;
+    background: #0009; padding: 6px 8px; border-radius: 8px; white-space: pre; pointer-events: none; }
+  .bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 14px calc(env(safe-area-inset-bottom) + 14px);
+    background: linear-gradient(#0000, #000d); }
+  #cue { font-size: 30px; font-weight: 800; text-align: center; min-height: 40px; margin-bottom: 8px; transition: transform .15s; }
+  #cue.pop { transform: scale(1.08); }
+  #status { text-align: center; color: #cfd6e0; font-size: 15px; margin-bottom: 6px; min-height: 20px; }
+  #endBtn { background: #ffffff22; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); margin: 0; }
+  #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 18px; background: #000c; }
+  #toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 90px); transform: translateX(-50%);
+    background: #222a; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); padding: 10px 14px; border-radius: 10px; font-size: 14px; z-index: 50; max-width: 90%; }
+</style>
+</head>
+<body>
+
+<!-- HOME -->
+<div id="home" class="screen">
+  <h1>Uchikomi Coach</h1>
+  <p class="sub">Harai goshi · live form cues</p>
+
+  <button class="primary" id="startBtn">Start drill</button>
+  <div class="row">
+    <button id="refLiveBtn">Record reference</button>
+    <button id="refFileBtn">Reference from video</button>
+  </div>
+  <input type="file" id="refFile" accept="video/*" class="hidden">
+  <div class="row">
+    <button id="historyBtn">History</button>
+    <button id="settingsBtn">Settings</button>
+  </div>
+
+  <div class="card" id="refCard"></div>
+
+  <div class="card muted">
+    <b style="color:var(--text)">How to use</b><br>
+    1. Prop the phone about 45° to the side of the pole, so your whole body is in frame from head to feet.<br>
+    2. Tap Start, then stand still in kamae <b>facing the pole</b> until you hear "Go".<br>
+    3. Drill. You'll get one spoken cue after each rep.<br>
+    4. Record a reference (you on a good day, or your coach) so your reps are scored against real targets instead of the defaults.
+  </div>
+</div>
+
+<!-- DRILL -->
+<div id="drill" class="screen hidden">
+  <div class="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="canvas"></canvas>
+  </div>
+  <div class="hud">
+    <div><div class="lbl" id="hudLeftLbl">Reps</div><div class="big" id="repCount">0</div></div>
+    <div class="right"><div class="lbl">Last score</div><div class="big" id="lastScore">–</div></div>
+  </div>
+  <div id="debug" class="hidden"></div>
+  <div class="bottom">
+    <div id="cue"></div>
+    <div id="status"></div>
+    <button id="endBtn">End</button>
+  </div>
+  <div id="loading" class="hidden">Loading pose model…</div>
+</div>
+
+<!-- HISTORY -->
+<div id="history" class="screen hidden">
+  <div class="topbar"><button class="backBtn">‹ Back</button><h1 style="margin:0">History</h1></div>
+  <div id="historyBody"></div>
+</div>
+
+<!-- SESSION DETAIL -->
+<div id="detail" class="screen hidden">
+  <div class="topbar"><button id="detailBack">‹ Back</button><h1 style="margin:0" id="detailTitle">Session</h1></div>
+  <div id="detailBody"></div>
+</div>
+
+<!-- SETTINGS -->
+<div id="settings" class="screen hidden">
+  <div class="topbar"><button class="backBtn">‹ Back</button><h1 style="margin:0">Settings</h1></div>
+  <div id="settingsBody"></div>
+  <h2>Data</h2>
+  <button id="exportBtn">Export all data (JSON)</button>
+  <button id="clearRefBtn">Clear reference</button>
+  <button class="danger" id="clearAllBtn">Delete all sessions</button>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<script type="module">
+// ======================= ANALYSIS-START (pure logic, no DOM) =======================
+const IDX = { lSh: 11, rSh: 12, lWr: 15, rWr: 16, lHip: 23, rHip: 24, lKnee: 25, rKnee: 26, lAnk: 27, rAnk: 28 };
+
+// hand = 'right' → right-handed harai goshi: sweep with right leg, support on left, hikite (sleeve) = left hand
+function sides(hand) {
+  const R = hand !== 'left';
+  return {
+    sweepHip: R ? IDX.rHip : IDX.lHip, sweepKnee: R ? IDX.rKnee : IDX.lKnee, sweepAnk: R ? IDX.rAnk : IDX.lAnk,
+    supHip: R ? IDX.lHip : IDX.rHip, supKnee: R ? IDX.lKnee : IDX.rKnee, supAnk: R ? IDX.lAnk : IDX.rAnk,
+    hikiteWr: R ? IDX.lWr : IDX.rWr,
+  };
+}
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
+const std = a => { const m = mean(a); return Math.sqrt(mean(a.map(x => (x - m) ** 2))); };
+const median = a => { const s = [...a].sort((x, y) => x - y); const n = s.length; return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2; };
+const vis = p => (p.visibility == null ? 1 : p.visibility);
+
+function angle3(a, b, c) {
+  const v1 = [a.x - b.x, a.y - b.y, a.z - b.z], v2 = [c.x - b.x, c.y - b.y, c.z - b.z];
+  const d = v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
+  const n = Math.hypot(...v1) * Math.hypot(...v2) || 1;
+  return Math.acos(clamp(d / n, -1, 1)) * 180 / Math.PI;
+}
+
+// Horizontal (x,z) direction of the hip line + shoulder line, from 3D world landmarks.
+function facingVec(w) {
+  const x = (w[IDX.rHip].x - w[IDX.lHip].x) + (w[IDX.rSh].x - w[IDX.lSh].x);
+  const z = (w[IDX.rHip].z - w[IDX.lHip].z) + (w[IDX.rSh].z - w[IDX.lSh].z);
+  const n = Math.hypot(x, z) || 1;
+  return [x / n, z / n];
+}
+
+function frameFeatures(lm, w, S, base) {
+  const hipY = (lm[IDX.lHip].y + lm[IDX.rHip].y) / 2;
+  const shY = (lm[IDX.lSh].y + lm[IDX.rSh].y) / 2;
+  const F = {
+    f: facingVec(w), hipY, shY,
+    ankY: (lm[IDX.lAnk].y + lm[IDX.rAnk].y) / 2,
+    supportKnee: angle3(w[S.supHip], w[S.supKnee], w[S.supAnk]),
+    sweepKnee: angle3(w[S.sweepHip], w[S.sweepKnee], w[S.sweepAnk]),
+    visOK: Math.min(vis(lm[IDX.lHip]), vis(lm[IDX.rHip]), vis(lm[IDX.lSh]), vis(lm[IDX.rSh])) > 0.4,
+  };
+  if (base) {
+    // image y grows downward, so a lower hip = bigger y
+    F.hipDrop = (hipY - base.hipY) / base.legLen;                       // fraction of standing leg length
+    F.sweepHeight = (lm[S.supAnk].y - lm[S.sweepAnk].y) / base.legLen;  // sweep ankle above support ankle
+    F.pull = (shY - lm[S.hikiteWr].y) / base.torso;                     // hikite wrist above shoulder line
+  }
+  return F;
+}
+
+class Analyzer {
+  constructor(o) { this.o = o; this.S = sides(o.hand); this.reset(); }
+  reset() { this.base = null; this.calib = []; this.state = 'calibrating'; this.fs = null; this.rep = null; this.live = {}; this.calibProgress = 0; }
+
+  // Returns null or an event: {type:'calibrated'} | {type:'rep', metrics} | {type:'discard', reason}
+  push(lm, w, t) {
+    if (!lm || !w) return null;
+    const F = frameFeatures(lm, w, this.S, this.base);
+    if (!F.visOK) { this.live.state = this.state + ' (body not visible)'; return null; }
+
+    if (this.state === 'calibrating') {
+      this.calib.push({ t, F });
+      while (this.calib.length && t - this.calib[0].t > this.o.calibMs) this.calib.shift();
+      const span = t - this.calib[0].t;
+      if (this.calib.length >= 5 && std(this.calib.map(c => c.F.hipY)) >= 0.012) {
+        this.calib = this.calib.slice(-2); this.calibProgress = 0;
+        this.live = { state: 'calibrating (hold still)' }; return null;
+      }
+      this.calibProgress = clamp(span / this.o.calibMs, 0, 1);
+      this.live = { state: 'calibrating' };
+      if (this.calib.length >= 5 && span >= this.o.calibMs * 0.9) {
+        const C = this.calib.map(c => c.F);
+        let fx = mean(C.map(c => c.f[0])), fz = mean(C.map(c => c.f[1])); const n = Math.hypot(fx, fz) || 1;
+        const hipY = mean(C.map(c => c.hipY));
+        const legLen = mean(C.map(c => c.ankY - c.hipY));
+        const torso = mean(C.map(c => c.hipY - c.shY));
+        if (legLen < 0.05 || torso < 0.03) { this.live = { state: 'calibrating (step back, whole body in frame)' }; this.calib = []; return null; }
+        this.base = { f: [fx / n, fz / n], hipY, legLen, torso };
+        this.fs = this.base.f.slice();
+        this.state = 'idle';
+        return { type: 'calibrated' };
+      }
+      return null;
+    }
+
+    // Smooth the facing direction as a unit vector (avoids angle wrap-around problems)
+    const a = this.o.smooth;
+    const sx = this.fs[0] * (1 - a) + F.f[0] * a, sz = this.fs[1] * (1 - a) + F.f[1] * a, sn = Math.hypot(sx, sz) || 1;
+    this.fs = [sx / sn, sz / sn];
+    const rot = Math.acos(clamp(this.fs[0] * this.base.f[0] + this.fs[1] * this.base.f[1], -1, 1)) * 180 / Math.PI;
+
+    this.live = { state: this.state, rot, hipDrop: F.hipDrop, supportKnee: F.supportKnee, sweepHeight: F.sweepHeight, sweepKnee: F.sweepKnee, pull: F.pull };
+
+    if (this.state === 'idle') {
+      // Slowly follow stance drift between reps (only when squarely facing the pole)
+      if (rot < this.o.exitDeg * 0.5) this.base.hipY += (F.hipY - this.base.hipY) * 0.02;
+      if (rot > this.o.enterDeg) {
+        this.state = 'active';
+        this.rep = { t0: t, rotation: rot, hipDrop: F.hipDrop, supportKnee: F.supportKnee, sweepHeight: F.sweepHeight, sweepKnee: F.sweepKnee, pull: F.pull };
+      }
+      return null;
+    }
+
+    if (this.state === 'active') {
+      const r = this.rep;
+      r.rotation = Math.max(r.rotation, rot);
+      r.hipDrop = Math.max(r.hipDrop, F.hipDrop);
+      r.supportKnee = Math.min(r.supportKnee, F.supportKnee);
+      if (F.sweepHeight > r.sweepHeight) { r.sweepHeight = F.sweepHeight; r.sweepKnee = F.sweepKnee; }
+      r.pull = Math.max(r.pull, F.pull);
+      if (t - r.t0 > this.o.maxRepMs) { this.state = 'stuck'; this.rep = null; return { type: 'discard', reason: 'held too long' }; }
+      if (rot < this.o.exitDeg) {
+        const dur = t - r.t0; this.state = 'idle'; this.rep = null;
+        if (dur < this.o.minRepMs) return { type: 'discard', reason: 'too quick, probably tracking noise' };
+        const { t0, ...m } = r;
+        return { type: 'rep', metrics: { ...m, durMs: Math.round(dur) } };
+      }
+      return null;
+    }
+
+    if (this.state === 'stuck' && rot < this.o.exitDeg) this.state = 'idle';
+    return null;
+  }
+}
+
+// Default targets are rough starting guesses. Recording a reference replaces them.
+const METRICS = [
+  { key: 'hipDrop',     label: 'Hip depth',      better: 'high', def: 0.12, tol: 0.10, w: 30, cue: 'Hips lower',                    unit: '%' },
+  { key: 'rotation',    label: 'Turn-in',        better: 'high', def: 150,  tol: 40,   w: 25, cue: 'Turn in more',                  unit: '°' },
+  { key: 'sweepHeight', label: 'Sweep height',   better: 'high', def: 0.30, tol: 0.25, w: 15, cue: 'Sweep higher',                  unit: '%', sweep: true },
+  { key: 'sweepKnee',   label: 'Sweep leg',      better: 'high', def: 160,  tol: 30,   w: 10, cue: 'Straighten your sweeping leg',  unit: '°', sweep: true },
+  { key: 'supportKnee', label: 'Support knee',   better: 'low',  def: 150,  tol: 25,   w: 10, cue: 'Bend your support knee',        unit: '°' },
+  { key: 'pull',        label: 'Pull hand',      better: 'high', def: 0.0,  tol: 0.40, w: 10, cue: 'Pull your sleeve hand up',      unit: '%' },
+];
+
+function activeMetrics(opts) { return METRICS.filter(M => !(M.sweep && !opts.scoreSweep) && !(M.key === 'pull' && !opts.scorePull)); }
+
+function scoreRep(m, ref, opts) {
+  let tw = 0, ts = 0, worst = null, worstLoss = 0;
+  const parts = {}, targets = {};
+  for (const M of activeMetrics(opts)) {
+    const target = ref && Number.isFinite(ref[M.key]) ? ref[M.key] : M.def;
+    const v = m[M.key];
+    if (!Number.isFinite(v)) continue;
+    const short = M.better === 'high' ? target - v : v - target;
+    const s = clamp(1 - Math.max(0, short) / M.tol, 0, 1);
+    parts[M.key] = s; targets[M.key] = target;
+    tw += M.w; ts += M.w * s;
+    const loss = M.w * (1 - s);
+    if (loss > worstLoss) { worstLoss = loss; worst = M; }
+  }
+  const score = tw ? Math.round(100 * ts / tw) : 0;
+  const good = score >= opts.goodScore || !worst;
+  return { score, parts, targets, cue: good ? 'Good rep' : worst.cue, cueKey: good ? null : worst.key };
+}
+
+function buildReference(repMetrics) {
+  const out = {};
+  for (const M of METRICS) {
+    const vals = repMetrics.map(r => r[M.key]).filter(Number.isFinite);
+    if (vals.length) out[M.key] = median(vals);
+  }
+  return out;
+}
+
+function fmtMetric(key, v) {
+  if (!Number.isFinite(v)) return '–';
+  const M = METRICS.find(x => x.key === key);
+  return M && M.unit === '%' ? Math.round(v * 100) + '%' : Math.round(v) + '°';
+}
+// ======================= ANALYSIS-END =======================
+
+// Export for node tests (no-op in the browser)
+globalThis.__uchikomi = { Analyzer, scoreRep, buildReference, METRICS, fmtMetric };
+if (typeof document === 'undefined') { /* running under tests */ } else { main(); }
+
+async function main() {
+  const { PoseLandmarker, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/vision_bundle.mjs');
+  const WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/wasm';
+  const MODEL = k => `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_${k}/float16/1/pose_landmarker_${k}.task`;
+
+  // ---------- storage (localStorage on the phone) ----------
+  const KEY = 'uchikomi.v1';
+  const DEFAULT_SETTINGS = {
+    hand: 'right', camera: 'environment', model: 'full', sayRepNumber: false, scoreSweep: true, scorePull: true,
+    goodScore: 90, enterDeg: 70, exitDeg: 40, minRepMs: 250, maxRepMs: 4000, calibMs: 1500, smooth: 0.35, showDebug: true, refReps: 3,
+  };
+  function load() {
+    try {
+      const d = JSON.parse(localStorage.getItem(KEY)) || {};
+      return { settings: { ...DEFAULT_SETTINGS, ...(d.settings || {}) }, reference: d.reference || null, sessions: d.sessions || [] };
+    } catch { return { settings: { ...DEFAULT_SETTINGS }, reference: null, sessions: [] }; }
+  }
+  let db = load();
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { toast('Could not save: ' + e.message); } }
+  try { navigator.storage?.persist?.(); } catch {}
+
+  // ---------- helpers ----------
+  const $ = id => document.getElementById(id);
+  const screens = ['home', 'drill', 'history', 'detail', 'settings'];
+  function show(id) { screens.forEach(s => $(s).classList.toggle('hidden', s !== id)); window.scrollTo(0, 0); }
+  let toastTimer;
+  function toast(msg, ms = 2500) { const t = $('toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), ms); }
+  const sClass = s => (s >= 85 ? 'g' : s >= 60 ? 'm' : 'b');
+  const fmtDate = iso => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // ---------- speech ----------
+  function say(text) {
+    if (!('speechSynthesis' in window)) return;
+    try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 1.1; u.lang = 'en-US'; speechSynthesis.speak(u); } catch {}
+  }
+
+  // ---------- wake lock ----------
+  let wakeLock = null;
+  async function lockScreen() { try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {} }
+  function unlockScreen() { try { wakeLock?.release(); } catch {} wakeLock = null; }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && running) lockScreen(); });
+
+  // ---------- pose model ----------
+  let landmarker = null, landmarkerModel = null;
+  async function ensureLandmarker() {
+    if (landmarker && landmarkerModel === db.settings.model) return;
+    $('loading').classList.remove('hidden');
+    try {
+      landmarker?.close?.();
+      const vision = await FilesetResolver.forVisionTasks(WASM);
+      const opts = d => ({ baseOptions: { modelAssetPath: MODEL(db.settings.model), delegate: d }, runningMode: 'VIDEO', numPoses: 1,
+        minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
+      try { landmarker = await PoseLandmarker.createFromOptions(vision, opts('GPU')); }
+      catch { landmarker = await PoseLandmarker.createFromOptions(vision, opts('CPU')); }
+      landmarkerModel = db.settings.model;
+    } finally { $('loading').classList.add('hidden'); }
+  }
+
+  // ---------- run loop ----------
+  const video = $('video'), canvas = $('canvas'), ctx = canvas.getContext('2d');
+  let running = false, mode = null, stream = null, analyzer = null, session = null, refReps = [], lastVT = -1, lastTs = 0, mirror = false, lastLm = null;
+
+  async function startRun(m, file) {
+    say(m === 'refvideo' ? 'Processing video' : 'Stand still, facing the pole'); // unlocks speech inside the tap
+    mode = m; show('drill');
+    $('repCount').textContent = '0'; $('lastScore').textContent = '–'; $('cue').textContent = '';
+    $('hudLeftLbl').textContent = m === 'drill' ? 'Reps' : 'Ref reps';
+    $('debug').classList.toggle('hidden', !db.settings.showDebug);
+    setStatus(m === 'refvideo' ? 'Loading video…' : 'Starting camera…');
+    try {
+      await ensureLandmarker();
+      if (file) {
+        video.srcObject = null; video.src = URL.createObjectURL(file); video.loop = false;
+        video.onended = () => finishReference(true);
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: db.settings.camera, frameRate: { ideal: 30 } }, audio: false });
+        video.src = ''; video.srcObject = stream; video.onended = null;
+      }
+      await video.play();
+    } catch (e) {
+      console.error(e); stopRun(false);
+      toast(file ? 'Could not open that video.' : 'Camera blocked. Allow camera access for this site in Settings → Safari → Camera.', 5000);
+      return;
+    }
+    mirror = !file && db.settings.camera === 'user';
+    video.classList.toggle('mirror', mirror); canvas.classList.toggle('mirror', mirror);
+    analyzer = new Analyzer(db.settings);
+    session = { id: Date.now(), date: new Date().toISOString(), hand: db.settings.hand, usedReference: !!db.reference, reps: [] };
+    refReps = []; lastVT = -1; lastLm = null;
+    running = true; lockScreen();
+    setStatus(m === 'refvideo' ? 'First second of the video should be standing still in kamae' : 'Stand still in kamae, facing the pole');
+    requestAnimationFrame(loop);
+  }
+
+  function setStatus(s) { $('status').textContent = s; }
+
+  function loop() {
+    if (!running) return;
+    requestAnimationFrame(loop);
+    if (video.readyState < 2 || video.currentTime === lastVT) return;
+    lastVT = video.currentTime;
+    let ts = performance.now(); if (ts <= lastTs) ts = lastTs + 1; lastTs = ts; // detectForVideo needs increasing timestamps
+    let res;
+    try { res = landmarker.detectForVideo(video, ts); } catch (e) { console.error(e); return; }
+    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const lm = res.landmarks?.[0], w = res.worldLandmarks?.[0];
+    if (lm && w) {
+      lastLm = lm; drawSkeleton(lm);
+      handle(analyzer.push(lm, w, ts));
+    } else if (analyzer.state === 'calibrating') setStatus('Can\'t see you. Get your whole body in frame');
+    if (analyzer.state === 'calibrating' && lm) setStatus(analyzer.live.state.includes('hold') || analyzer.live.state.includes('step') ? analyzer.live.state.replace('calibrating ', '').replace(/[()]/g, '') : `Calibrating… ${Math.round(analyzer.calibProgress * 100)}%`);
+    if (db.settings.showDebug) renderDebug();
+  }
+
+  const BONES = PoseLandmarker.POSE_CONNECTIONS.filter(c => c.start >= 11 && c.end >= 11); // skip face
+  function drawSkeleton(lm) {
+    const W = canvas.width, H = canvas.height, S = sides(db.settings.hand);
+    const sweepSet = new Set([S.sweepHip, S.sweepKnee, S.sweepAnk]);
+    ctx.lineWidth = Math.max(3, W / 160); ctx.lineCap = 'round';
+    for (const { start, end } of BONES) {
+      const a = lm[start], b = lm[end];
+      ctx.strokeStyle = sweepSet.has(start) && sweepSet.has(end) ? '#f0b429' : 'rgba(255,255,255,0.85)';
+      ctx.beginPath(); ctx.moveTo(a.x * W, a.y * H); ctx.lineTo(b.x * W, b.y * H); ctx.stroke();
+    }
+    ctx.fillStyle = '#3d8bfd';
+    for (let i = 11; i < lm.length; i++) { ctx.beginPath(); ctx.arc(lm[i].x * W, lm[i].y * H, Math.max(3, W / 200), 0, 7); ctx.fill(); }
+    if (analyzer?.base) { // standing hip line for reference
+      ctx.strokeStyle = 'rgba(61,139,253,0.6)'; ctx.setLineDash([10, 10]); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, analyzer.base.hipY * H); ctx.lineTo(W, analyzer.base.hipY * H); ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+
+  function renderDebug() {
+    const L = analyzer.live || {};
+    const f = (k) => fmtMetric(k, L[k]);
+    $('debug').textContent = `state   ${L.state || ''}\nturn    ${Number.isFinite(L.rot) ? Math.round(L.rot) + '°' : '–'}\nhips    ${f('hipDrop')}\nsup knee ${f('supportKnee')}\nsweep   ${f('sweepHeight')}  leg ${f('sweepKnee')}\npull    ${f('pull')}`;
+  }
+
+  function handle(ev) {
+    if (!ev) return;
+    if (ev.type === 'calibrated') {
+      setStatus(mode === 'drill' ? (db.reference ? 'Scoring against your reference' : 'No reference yet, using default targets') : `Do ${db.settings.refReps} clean reps`);
+      if (mode !== 'refvideo') say(mode === 'drill' ? 'Go' : `Go. Do ${db.settings.refReps} clean reps`);
+      return;
+    }
+    if (ev.type === 'discard') { setStatus('Rep ignored: ' + ev.reason); return; }
+    if (ev.type === 'rep') {
+      if (mode === 'drill') {
+        const sc = scoreRep(ev.metrics, db.reference?.metrics, db.settings);
+        const rep = { n: session.reps.length + 1, t: Date.now(), metrics: ev.metrics, score: sc.score, cue: sc.cue, cueKey: sc.cueKey, parts: sc.parts };
+        session.reps.push(rep);
+        $('repCount').textContent = rep.n;
+        $('lastScore').textContent = rep.score; $('lastScore').className = 'big s-' + sClass(rep.score);
+        $('cue').textContent = rep.cue; $('cue').classList.add('pop'); setTimeout(() => $('cue').classList.remove('pop'), 150);
+        say((db.settings.sayRepNumber ? rep.n + '. ' : '') + rep.cue);
+      } else {
+        refReps.push(ev.metrics);
+        $('repCount').textContent = refReps.length;
+        $('cue').textContent = `Reference rep ${refReps.length}`;
+        if (mode === 'reference') say(String(refReps.length));
+        if (mode === 'reference' && refReps.length >= db.settings.refReps) finishReference(false);
+      }
+    }
+  }
+
+  function finishReference(fromVideo) {
+    if (!refReps.length) {
+      stopRun(false);
+      toast(analyzer?.base ? 'No reps detected. Check the angle and try again.' : 'Couldn\'t calibrate. The video needs ~1.5 s of standing still at the start.', 5000);
+      return;
+    }
+    db.reference = { metrics: buildReference(refReps), source: fromVideo ? 'video' : 'live', reps: refReps.length, date: new Date().toISOString(), hand: db.settings.hand };
+    save(); say('Reference saved'); toast(`Reference saved from ${refReps.length} rep${refReps.length > 1 ? 's' : ''}`);
+    stopRun(false); renderHome();
+  }
+
+  function stopRun(keepSession = true) {
+    running = false; unlockScreen();
+    try { stream?.getTracks().forEach(t => t.stop()); } catch {}
+    stream = null; video.pause(); video.onended = null;
+    if (video.src && video.src.startsWith('blob:')) URL.revokeObjectURL(video.src);
+    video.removeAttribute('src'); video.srcObject = null;
+    if (keepSession && mode === 'drill' && session?.reps.length) {
+      db.sessions.unshift(session); save();
+      openDetail(session.id); return;
+    }
+    if (mode === 'reference' && keepSession && refReps.length) { finishReference(false); return; }
+    show('home'); renderHome();
+  }
+
+  // ---------- home ----------
+  function renderHome() {
+    const r = db.reference;
+    $('refCard').innerHTML = r
+      ? `<b>Reference</b> <span class="muted">· ${r.source}, ${r.reps} rep${r.reps > 1 ? 's' : ''}, ${fmtDate(r.date)}${r.hand !== db.settings.hand ? ' · ⚠️ recorded ' + r.hand + '-handed' : ''}</span>
+         <div class="chips">${METRICS.map(M => `<span class="chip">${M.label} ${fmtMetric(M.key, r.metrics[M.key])}</span>`).join('')}</div>`
+      : `<b>No reference yet</b><div class="muted">Reps are scored against rough default targets until you record one.</div>`;
+  }
+
+  // ---------- history ----------
+  function sessionStats(s) { const sc = s.reps.map(r => r.score); return { n: sc.length, avg: sc.length ? Math.round(mean(sc)) : 0, best: sc.length ? Math.max(...sc) : 0 }; }
+
+  function renderHistory() {
+    const all = db.sessions.flatMap(s => s.reps.map(r => ({ ...r, sid: s.id, date: s.date })));
+    const top = all.sort((a, b) => b.score - a.score).slice(0, 5);
+    let h = '';
+    if (!db.sessions.length) h = '<p class="muted">No sessions yet. Go drill!</p>';
+    else {
+      h += '<h2>All-time best reps</h2>' + top.map(r => `<div class="card"><span class="score s-${sClass(r.score)}">${r.score}</span> <span class="muted">· rep ${r.n} · ${fmtDate(r.date)}</span></div>`).join('');
+      h += '<h2>Sessions</h2>' + db.sessions.map(s => {
+        const st = sessionStats(s);
+        return `<button class="card" style="text-align:left" data-sid="${s.id}"><div style="display:flex;justify-content:space-between"><span>${fmtDate(s.date)}</span><span class="score s-${sClass(st.avg)}">${st.avg}</span></div>
+          <div class="muted">${st.n} reps · best ${st.best}${s.usedReference ? '' : ' · default targets'}</div></button>`;
+      }).join('');
+    }
+    $('historyBody').innerHTML = h;
+    $('historyBody').querySelectorAll('[data-sid]').forEach(b => b.onclick = () => openDetail(+b.dataset.sid));
+  }
+
+  let detailFrom = 'history';
+  function openDetail(id) {
+    const s = db.sessions.find(x => x.id === id); if (!s) return;
+    detailFrom = $('history').classList.contains('hidden') ? 'home' : 'history';
+    const st = sessionStats(s);
+    $('detailTitle').textContent = fmtDate(s.date);
+    const cueCounts = {}; s.reps.forEach(r => { if (r.cueKey) cueCounts[r.cue] = (cueCounts[r.cue] || 0) + 1; });
+    const topCues = Object.entries(cueCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    let h = `<div class="card"><div class="row"><div><div class="muted">Reps</div><div class="score">${st.n}</div></div>
+      <div><div class="muted">Average</div><div class="score s-${sClass(st.avg)}">${st.avg}</div></div>
+      <div><div class="muted">Best</div><div class="score s-${sClass(st.best)}">${st.best}</div></div></div>
+      ${topCues.length ? `<div class="muted" style="margin-top:8px">Most common: ${topCues.map(([c, n]) => `${esc(c)} (${n})`).join(', ')}</div>` : ''}</div>`;
+    h += '<h2>Reps, best first</h2>';
+    h += [...s.reps].sort((a, b) => b.score - a.score).map(r => `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center"><span><span class="score s-${sClass(r.score)}">${r.score}</span> <span class="muted">· rep ${r.n}</span></span><span class="muted">${esc(r.cue)}</span></div>
+      <div class="chips">${METRICS.filter(M => r.parts[M.key] != null).map(M => `<span class="chip ${sClass(r.parts[M.key] * 100)}">${M.label} ${fmtMetric(M.key, r.metrics[M.key])}</span>`).join('')}</div>
+      <button class="small" data-ref="${r.n}">Use as reference</button></div>`).join('');
+    h += `<button class="danger" id="delSession">Delete this session</button>`;
+    $('detailBody').innerHTML = h;
+    $('detailBody').querySelectorAll('[data-ref]').forEach(b => b.onclick = () => {
+      const r = s.reps.find(x => x.n === +b.dataset.ref);
+      db.reference = { metrics: { ...r.metrics }, source: `rep ${r.n} on ${fmtDate(s.date)}`, reps: 1, date: new Date().toISOString(), hand: s.hand || db.settings.hand };
+      save(); toast('Reference updated'); renderHome();
+    });
+    $('delSession').onclick = () => { if (confirm('Delete this session?')) { db.sessions = db.sessions.filter(x => x.id !== id); save(); renderHistory(); show('history'); } };
+    show('detail');
+  }
+  $('detailBack').onclick = () => { if (detailFrom === 'history') { renderHistory(); show('history'); } else { show('home'); renderHome(); } };
+
+  // ---------- settings ----------
+  const FIELDS = [
+    ['hand', 'Throwing side', 'Right = sweep with right leg', 'select', [['right', 'Right'], ['left', 'Left']]],
+    ['camera', 'Camera', '', 'select', [['environment', 'Back'], ['user', 'Front (selfie)']]],
+    ['model', 'Pose model', 'Lite is faster, Full is more accurate', 'select', [['lite', 'Lite'], ['full', 'Full'], ['heavy', 'Heavy (slow)']]],
+    ['scoreSweep', 'Score the sweep', 'Turn off if you only drill the entry', 'check'],
+    ['scorePull', 'Score the pull hand', 'Turn off if the band setup makes it meaningless', 'check'],
+    ['sayRepNumber', 'Say rep number', 'e.g. "7. Hips lower"', 'check'],
+    ['showDebug', 'Show live numbers', 'Handy for tuning', 'check'],
+    ['goodScore', '"Good rep" score', 'At or above this, no correction', 'number'],
+    ['refReps', 'Reference reps', 'How many reps to average', 'number'],
+    ['enterDeg', 'Rep start turn (°)', 'Turn past this = rep started', 'number'],
+    ['exitDeg', 'Rep end turn (°)', 'Turn back under this = rep done', 'number'],
+    ['minRepMs', 'Min rep time (ms)', '', 'number'],
+    ['maxRepMs', 'Max rep time (ms)', '', 'number'],
+  ];
+  function renderSettings() {
+    $('settingsBody').innerHTML = FIELDS.map(([k, label, hint, type, opts]) => {
+      const v = db.settings[k];
+      const input = type === 'select' ? `<select data-k="${k}">${opts.map(([val, t]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`
+        : type === 'check' ? `<input type="checkbox" data-k="${k}" ${v ? 'checked' : ''}>`
+        : `<input type="number" inputmode="numeric" data-k="${k}" value="${v}">`;
+      return `<label class="field"><span>${label}${hint ? `<small>${hint}</small>` : ''}</span>${input}</label>`;
+    }).join('') + `<button class="small" id="resetSettings">Reset to defaults</button>`;
+    $('settingsBody').querySelectorAll('[data-k]').forEach(el => el.onchange = () => {
+      const k = el.dataset.k;
+      db.settings[k] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
+      save(); renderHome();
+    });
+    $('resetSettings').onclick = () => { db.settings = { ...DEFAULT_SETTINGS }; save(); renderSettings(); toast('Settings reset'); };
+  }
+
+  // ---------- wiring ----------
+  $('startBtn').onclick = () => startRun('drill');
+  $('refLiveBtn').onclick = () => startRun('reference');
+  $('refFileBtn').onclick = () => $('refFile').click();
+  $('refFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) startRun('refvideo', f); };
+  $('endBtn').onclick = () => stopRun(true);
+  $('historyBtn').onclick = () => { renderHistory(); show('history'); };
+  $('settingsBtn').onclick = () => { renderSettings(); show('settings'); };
+  document.querySelectorAll('.backBtn').forEach(b => b.onclick = () => { show('home'); renderHome(); });
+  $('exportBtn').onclick = () => {
+    const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `uchikomi-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+  $('clearRefBtn').onclick = () => { if (confirm('Clear the reference?')) { db.reference = null; save(); renderHome(); toast('Reference cleared'); } };
+  $('clearAllBtn').onclick = () => { if (confirm('Delete ALL sessions? This can\'t be undone.')) { db.sessions = []; save(); toast('All sessions deleted'); } };
+
+  renderHome();
+}
+</script>
+</body>
+</html>
