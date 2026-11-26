@@ -696,7 +696,8 @@ async function main() {
     if (wasRunning && analyzer && !analyzer.base) track('calibration failed', { mode, throw: curThrow(), seconds_waited: Math.round((performance.now() - runT0) / 1000) });
     if (wasRunning && mode === 'drill') {
       const st = sessionStats(session);
-      track('drill ended', { duration_s: Math.round((Date.now() - tapT0) / 1000), reps: st.n, avg_score: st.n ? st.avg : null, best_score: st.n ? st.best : null,
+      session.durationS = Math.round((Date.now() - tapT0) / 1000);
+      track('drill ended', { duration_s: session.durationS, reps: st.n, avg_score: st.n ? st.avg : null, best_score: st.n ? st.best : null,
         throw: session.throw, used_reference: session.usedReference, hand: session.hand, calibration_s: calibS });
     }
     running = false; unlockScreen();
@@ -742,6 +743,65 @@ async function main() {
     $('historyBody').querySelectorAll('[data-sid]').forEach(b => b.onclick = () => openDetail(+b.dataset.sid));
   }
 
+  // ---------- share card (square PNG of the session stats) ----------
+  function sessionMinutes(s) {
+    const ts = s.reps.map(r => r.t).filter(Number.isFinite);
+    const sec = s.durationS ?? (ts.length > 1 ? (Math.max(...ts) - Math.min(...ts)) / 1000 : 0); // older sessions: first to last rep
+    return sec > 0 && sec < 4 * 3600 ? Math.max(1, Math.round(sec / 60)) : null;
+  }
+  function drawShareCard(s) {
+    const S = 1080, c = document.createElement('canvas'); c.width = c.height = S;
+    const g = c.getContext('2d'), st = sessionStats(s), F = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    const col = v => (v >= 85 ? '#2fbf71' : v >= 60 ? '#f0b429' : '#ef5350');
+    const grad = g.createLinearGradient(0, 0, S, S); grad.addColorStop(0, '#151920'); grad.addColorStop(1, '#0b0d10');
+    g.fillStyle = grad; g.fillRect(0, 0, S, S);
+    const P = 80; g.textBaseline = 'alphabetic';
+    g.fillStyle = '#3d8bfd'; g.font = `700 30px ${F}`; g.fillText('UCHIKOMI COACH', P, P + 30);
+    g.fillStyle = '#eef1f5'; g.font = `800 76px ${F}`; g.fillText(throwLabel(s.throw), P, P + 130);
+    g.fillStyle = '#8b95a5'; g.font = `500 36px ${F}`;
+    g.fillText(new Date(s.date).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }), P, P + 184);
+    // big numbers
+    [['REPS', st.n, '#eef1f5'], ['AVERAGE', st.avg, col(st.avg)], ['BEST', st.best, col(st.best)]].forEach(([lbl, v, cl], i) => {
+      const x = P + i * ((S - 2 * P) / 3);
+      g.fillStyle = cl; g.font = `800 120px ${F}`; g.fillText(String(v), x, P + 360);
+      g.fillStyle = '#8b95a5'; g.font = `700 26px ${F}`; g.fillText(lbl, x + 4, P + 405);
+    });
+    // score per rep
+    const cx = P, cy = 560, cw = S - 2 * P, ch = 250, n = s.reps.length;
+    g.strokeStyle = '#262c36'; g.lineWidth = 2; g.beginPath(); g.moveTo(cx, cy + ch + 0.5); g.lineTo(cx + cw, cy + ch + 0.5); g.stroke();
+    if (n) {
+      const slot = cw / n, bw = Math.max(2, Math.min(40, slot * 0.7));
+      s.reps.forEach((r, i) => {
+        const h = Math.max(4, (r.score / 100) * ch), x = cx + i * slot + (slot - bw) / 2;
+        g.fillStyle = col(r.score); g.beginPath();
+        g.roundRect ? g.roundRect(x, cy + ch - h, bw, h, Math.min(6, bw / 2)) : g.rect(x, cy + ch - h, bw, h); g.fill();
+      });
+    }
+    g.fillStyle = '#8b95a5'; g.font = `600 26px ${F}`; g.fillText('SCORE PER REP', cx, cy + ch + 48);
+    // footer
+    const mins = sessionMinutes(s);
+    g.fillStyle = '#eef1f5'; g.font = `600 40px ${F}`;
+    if (mins) g.fillText(`${mins} min trained`, P, S - P - 60);
+    g.fillStyle = '#8b95a5'; g.font = `500 30px ${F}`; g.fillText('judo.lifeofjeso.ca', P, S - P);
+    return c;
+  }
+  const cardFile = s => new Promise(res => drawShareCard(s).toBlob(b => res(b && new File([b], `uchikomi-${(s.throw || 'harai_goshi').replace(/_/g, '-')}-${s.date.slice(0, 10)}.png`, { type: 'image/png' })), 'image/png'));
+
+  let shareFile = null; // made when the summary opens, so the tap can call share() straight away (Safari needs that)
+  async function shareSession(s) {
+    const file = shareFile?.id === s.id ? shareFile.file : await cardFile(s);
+    if (!file) { toast('Could not make the image'); return; }
+    const props = { throw: s.throw || 'harai_goshi', reps: s.reps.length };
+    if (navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); track('session shared', { ...props, method: 'share sheet' }); }
+      catch (e) { if (e.name !== 'AbortError') toast('Sharing failed: ' + e.message); }
+      return;
+    }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    track('session shared', { ...props, method: 'download' }); toast('Image saved');
+  }
+
   let detailFrom = 'history';
   function openDetail(id) {
     const s = db.sessions.find(x => x.id === id); if (!s) return;
@@ -754,6 +814,7 @@ async function main() {
       <div><div class="muted">Average</div><div class="score s-${sClass(st.avg)}">${st.avg}</div></div>
       <div><div class="muted">Best</div><div class="score s-${sClass(st.best)}">${st.best}</div></div></div>
       ${topCues.length ? `<div class="muted" style="margin-top:8px">Most common: ${topCues.map(([c, n]) => `${esc(c)} (${n})`).join(', ')}</div>` : ''}</div>`;
+    h += `<button class="primary" id="shareSession">Share session</button>`;
     h += '<h2>Reps, best first</h2>';
     h += [...s.reps].sort((a, b) => b.score - a.score).map(r => `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center"><span><span class="score s-${sClass(r.score)}">${r.score}</span> <span class="muted">· rep ${r.n}</span></span><span class="muted">${esc(r.cue)}</span></div>
@@ -761,6 +822,8 @@ async function main() {
       <button class="small" data-ref="${r.n}">Use as reference</button></div>`).join('');
     h += `<button class="danger" id="delSession">Delete this session</button>`;
     $('detailBody').innerHTML = h;
+    shareFile = null; cardFile(s).then(file => { shareFile = { id: s.id, file }; });
+    $('shareSession').onclick = () => shareSession(s);
     $('detailBody').querySelectorAll('[data-ref]').forEach(b => b.onclick = () => {
       const r = s.reps.find(x => x.n === +b.dataset.ref);
       const t = THROWS[s.throw] ? s.throw : 'harai_goshi';

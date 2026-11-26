@@ -24,6 +24,10 @@ Live: **https://judo.lifeofjeso.ca**
 - Sessions, settings and the reference are saved in `localStorage` on the phone. There's no backend.
 - The camera only works over HTTPS (Vercel provides it).
 
+## Sharing a session
+
+The session summary has a **Share session** button. It draws a square 1080×1080 PNG in the browser: the throw, date, reps, average and best score, a bar for each rep's score, minutes trained and `judo.lifeofjeso.ca`. No camera image is included. On a phone it opens the share sheet (Messages, WhatsApp, Instagram story and so on), and on a computer it downloads the image. Sessions now save their length (`durationS`). For older sessions the minutes are estimated from the first to the last rep.
+
 ## Privacy and analytics
 
 - On first open, a popup asks whether to share anonymous usage stats. **Nothing is loaded or sent until the person taps OK.** "No thanks" turns analytics off, and the choice can be changed later under Settings → Privacy. The choice is stored in `localStorage` under `uchikomi.consent`.
@@ -39,7 +43,8 @@ Live: **https://judo.lifeofjeso.ca**
   | `calibration slow` | `mode`, `throw`, `seconds` (sent when calibration takes over 10 s) |
   | `calibration failed` | `mode`, `throw`, `seconds_waited` (the run ended before calibration finished) |
   | `settings changed` | `setting`, `value` (choosing a throw sends `setting: throw`) |
-  | `reference recorded` | `throw`, `source` (`live`, `video` or `session rep`), `reps` |
+  | `session shared` | `throw`, `reps`, `method` (`share sheet` or `download`; sent only when the share completes) |
+| `reference recorded` | `throw`, `source` (`live`, `video` or `session rep`), `reps` |
 
 - **After-session feedback:** when a drill with at least one rep ends, a popup asks *"Is there anything you wish this app would do?"* with a text box, **Send** and a close **×**. It appears after the first finished drill, then at most once every 30 days (`uchikomi.feedbackAt`), and only for people who said OK to analytics. Answers are sent as responses to the PostHog API survey **"Uchikomi Coach: after-session wish"**, so they show up under Surveys in PostHog.
 
