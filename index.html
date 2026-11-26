@@ -36,6 +36,7 @@
   label.field span small { display: block; color: var(--muted); font-size: 13px; }
   select, input[type=number] { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-size: 16px; max-width: 150px; }
   input[type=checkbox] { width: 24px; height: 24px; }
+  select.throwSel { display: block; width: 100%; max-width: none; padding: 14px; font-size: 17px; font-weight: 600; border-radius: 14px; background: var(--panel); }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .chip { font-size: 12px; padding: 4px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
   .chip.g { border-color: var(--good); color: #a8efc6; } .chip.m { border-color: var(--mid); color: #ffe199; } .chip.b { border-color: var(--bad); color: #ffb4b0; }
@@ -83,8 +84,10 @@
 <!-- HOME -->
 <div id="home" class="screen">
   <h1>Uchikomi Coach</h1>
-  <p class="sub">Harai goshi · live form cues</p>
+  <p class="sub">Live form cues for throw entries</p>
 
+  <label class="muted" for="throwSel">Throw</label>
+  <select id="throwSel" class="throwSel"></select>
   <button class="primary" id="startBtn">Start drill</button>
   <div class="row">
     <button id="refLiveBtn">Record reference</button>
@@ -146,7 +149,7 @@
   <label class="field"><span>Share anonymous usage stats<small>How long you train, rep counts, scores. Never camera video.</small></span><input type="checkbox" id="consentToggle"></label>
   <h2>Data</h2>
   <button id="exportBtn">Export all data (JSON)</button>
-  <button id="clearRefBtn">Clear reference</button>
+  <button id="clearRefBtn">Clear reference for this throw</button>
   <button class="danger" id="clearAllBtn">Delete all sessions</button>
 </div>
 
@@ -179,7 +182,7 @@
 // ======================= ANALYSIS-START (pure logic, no DOM) =======================
 const IDX = { lSh: 11, rSh: 12, lWr: 15, rWr: 16, lHip: 23, rHip: 24, lKnee: 25, rKnee: 26, lAnk: 27, rAnk: 28 };
 
-// hand = 'right' → right-handed harai goshi: sweep with right leg, support on left, hikite (sleeve) = left hand
+// hand = 'right' → right-handed throw: sweep/block with right leg, support on left, hikite (sleeve) = left hand
 function sides(hand) {
   const R = hand !== 'left';
   return {
@@ -218,6 +221,9 @@ function frameFeatures(lm, w, S, base) {
     ankY: (lm[IDX.lAnk].y + lm[IDX.rAnk].y) / 2,
     supportKnee: angle3(w[S.supHip], w[S.supKnee], w[S.supAnk]),
     sweepKnee: angle3(w[S.sweepHip], w[S.sweepKnee], w[S.sweepAnk]),
+    spread: Math.hypot(w[IDX.lAnk].x - w[IDX.rAnk].x, w[IDX.lAnk].z - w[IDX.rAnk].z),
+    legW: (Math.hypot(w[IDX.lHip].x - w[IDX.lAnk].x, w[IDX.lHip].y - w[IDX.lAnk].y, w[IDX.lHip].z - w[IDX.lAnk].z)
+         + Math.hypot(w[IDX.rHip].x - w[IDX.rAnk].x, w[IDX.rHip].y - w[IDX.rAnk].y, w[IDX.rHip].z - w[IDX.rAnk].z)) / 2,
     visOK: Math.min(vis(lm[IDX.lHip]), vis(lm[IDX.rHip]), vis(lm[IDX.lSh]), vis(lm[IDX.rSh])) > 0.4,
   };
   if (base) {
@@ -225,6 +231,8 @@ function frameFeatures(lm, w, S, base) {
     F.hipDrop = (hipY - base.hipY) / base.legLen;                       // fraction of standing leg length
     F.sweepHeight = (lm[S.supAnk].y - lm[S.sweepAnk].y) / base.legLen;  // sweep ankle above support ankle
     F.pull = (shY - lm[S.hikiteWr].y) / base.torso;                     // hikite wrist above shoulder line
+    F.bothKnees = Math.max(F.supportKnee, F.sweepKnee);                 // the straighter of the two knees
+    F.blockWidth = F.spread / base.legW;                                // feet apart, in standing leg lengths
   }
   return F;
 }
@@ -255,8 +263,9 @@ class Analyzer {
         const hipY = mean(C.map(c => c.hipY));
         const legLen = mean(C.map(c => c.ankY - c.hipY));
         const torso = mean(C.map(c => c.hipY - c.shY));
+        const legW = mean(C.map(c => c.legW)) || 1;
         if (legLen < 0.05 || torso < 0.03) { this.live = { state: 'calibrating (step back, whole body in frame)' }; this.calib = []; return null; }
-        this.base = { f: [fx / n, fz / n], hipY, legLen, torso };
+        this.base = { f: [fx / n, fz / n], hipY, legLen, torso, legW };
         this.fs = this.base.f.slice();
         this.state = 'idle';
         return { type: 'calibrated' };
@@ -270,14 +279,15 @@ class Analyzer {
     this.fs = [sx / sn, sz / sn];
     const rot = Math.acos(clamp(this.fs[0] * this.base.f[0] + this.fs[1] * this.base.f[1], -1, 1)) * 180 / Math.PI;
 
-    this.live = { state: this.state, rot, hipDrop: F.hipDrop, supportKnee: F.supportKnee, sweepHeight: F.sweepHeight, sweepKnee: F.sweepKnee, pull: F.pull };
+    this.live = { state: this.state, rot, hipDrop: F.hipDrop, supportKnee: F.supportKnee, sweepHeight: F.sweepHeight, sweepKnee: F.sweepKnee, pull: F.pull, bothKnees: F.bothKnees, blockWidth: F.blockWidth };
 
     if (this.state === 'idle') {
       // Slowly follow stance drift between reps (only when squarely facing the pole)
       if (rot < this.o.exitDeg * 0.5) this.base.hipY += (F.hipY - this.base.hipY) * 0.02;
       if (rot > this.o.enterDeg) {
         this.state = 'active';
-        this.rep = { t0: t, rotation: rot, hipDrop: F.hipDrop, supportKnee: F.supportKnee, sweepHeight: F.sweepHeight, sweepKnee: F.sweepKnee, pull: F.pull };
+        this.rep = { t0: t, rotation: rot, hipDrop: F.hipDrop, supportKnee: F.supportKnee, sweepHeight: F.sweepHeight, sweepKnee: F.sweepKnee, pull: F.pull,
+          bothKnees: F.bothKnees, blockKnee: F.sweepKnee, blockWidth: F.blockWidth };
       }
       return null;
     }
@@ -289,6 +299,9 @@ class Analyzer {
       r.supportKnee = Math.min(r.supportKnee, F.supportKnee);
       if (F.sweepHeight > r.sweepHeight) { r.sweepHeight = F.sweepHeight; r.sweepKnee = F.sweepKnee; }
       r.pull = Math.max(r.pull, F.pull);
+      r.bothKnees = Math.min(r.bothKnees, F.bothKnees);
+      r.blockKnee = Math.max(r.blockKnee, F.sweepKnee);
+      r.blockWidth = Math.max(r.blockWidth, F.blockWidth);
       if (t - r.t0 > this.o.maxRepMs) { this.state = 'stuck'; this.rep = null; return { type: 'discard', reason: 'held too long' }; }
       if (rot < this.o.exitDeg) {
         const dur = t - r.t0; this.state = 'idle'; this.rep = null;
@@ -304,17 +317,59 @@ class Analyzer {
   }
 }
 
-// Default targets are rough starting guesses. Recording a reference replaces them.
-const METRICS = [
-  { key: 'hipDrop',     label: 'Hip depth',      better: 'high', def: 0.12, tol: 0.10, w: 30, cue: 'Hips lower',                    unit: '%' },
-  { key: 'rotation',    label: 'Turn-in',        better: 'high', def: 150,  tol: 40,   w: 25, cue: 'Turn in more',                  unit: '°' },
-  { key: 'sweepHeight', label: 'Sweep height',   better: 'high', def: 0.30, tol: 0.25, w: 15, cue: 'Sweep higher',                  unit: '%', sweep: true },
-  { key: 'sweepKnee',   label: 'Sweep leg',      better: 'high', def: 160,  tol: 30,   w: 10, cue: 'Straighten your sweeping leg',  unit: '°', sweep: true },
-  { key: 'supportKnee', label: 'Support knee',   better: 'low',  def: 150,  tol: 25,   w: 10, cue: 'Bend your support knee',        unit: '°' },
-  { key: 'pull',        label: 'Pull hand',      better: 'high', def: 0.0,  tol: 0.40, w: 10, cue: 'Pull your sleeve hand up',      unit: '%' },
-];
+// What each measurement is called and how it's shown
+const METRIC_INFO = {
+  hipDrop:     { label: 'Hip depth',    unit: '%' },
+  rotation:    { label: 'Turn-in',      unit: '°' },
+  sweepHeight: { label: 'Sweep height', unit: '%' },
+  sweepKnee:   { label: 'Sweep leg',    unit: '°' },
+  supportKnee: { label: 'Support knee', unit: '°' },
+  bothKnees:   { label: 'Knee bend',    unit: '°' },
+  blockKnee:   { label: 'Block leg',    unit: '°' },
+  blockWidth:  { label: 'Block width',  unit: '%' },
+  pull:        { label: 'Pull hand',    unit: '%' },
+};
+const METRICS = Object.entries(METRIC_INFO).map(([key, i]) => ({ key, ...i }));
 
-function activeMetrics(opts) { return METRICS.filter(M => !(M.sweep && !opts.scoreSweep) && !(M.key === 'pull' && !opts.scorePull)); }
+// Per-throw scoring. Default targets are rough starting guesses. Recording a reference replaces them.
+// better: 'high' | 'low' | 'near' (near = penalise both sides; cue = too-low cue, cueHigh = too-high cue)
+// sweep: true → switched off by the "Score the sweep" setting
+const SEOI = [
+  { key: 'rotation',    better: 'high', def: 170,  tol: 40,   w: 30, cue: 'Turn in fully' },
+  { key: 'hipDrop',     better: 'high', def: 0.20, tol: 0.12, w: 30, cue: 'Hips lower' },
+  { key: 'bothKnees',   better: 'low',  def: 130,  tol: 35,   w: 25, cue: 'Bend both knees' },
+  { key: 'pull',        better: 'high', def: 0.0,  tol: 0.40, w: 15, cue: 'Pull your sleeve hand' },
+];
+const THROWS = {
+  harai_goshi: { label: 'Harai goshi', metrics: [
+    { key: 'hipDrop',     better: 'high', def: 0.12, tol: 0.10, w: 30, cue: 'Hips lower' },
+    { key: 'rotation',    better: 'high', def: 150,  tol: 40,   w: 25, cue: 'Turn in more' },
+    { key: 'sweepHeight', better: 'high', def: 0.30, tol: 0.25, w: 15, cue: 'Sweep higher', sweep: true },
+    { key: 'sweepKnee',   better: 'high', def: 160,  tol: 30,   w: 10, cue: 'Straighten your sweeping leg', sweep: true },
+    { key: 'supportKnee', better: 'low',  def: 150,  tol: 25,   w: 10, cue: 'Bend your support knee' },
+    { key: 'pull',        better: 'high', def: 0.0,  tol: 0.40, w: 10, cue: 'Pull your sleeve hand up' },
+  ] },
+  ippon_seoi_nage: { label: 'Ippon seoi nage', metrics: SEOI },
+  morote_seoi_nage: { label: 'Morote seoi nage', metrics: SEOI },
+  uchi_mata: { label: 'Uchi mata', metrics: [
+    { key: 'rotation',    better: 'high', def: 150,  tol: 40,   w: 25, cue: 'Turn in more' },
+    { key: 'sweepHeight', better: 'high', def: 0.50, tol: 0.35, w: 30, cue: 'Sweep higher', sweep: true },
+    { key: 'sweepKnee',   better: 'high', def: 160,  tol: 30,   w: 15, cue: 'Straighten your sweeping leg', sweep: true },
+    { key: 'supportKnee', better: 'near', def: 155,  tol: 25,   w: 15, cue: "Don't sink so deep", cueHigh: 'Bend your support knee slightly' },
+    { key: 'pull',        better: 'high', def: 0.0,  tol: 0.40, w: 15, cue: 'Pull your sleeve hand' },
+  ] },
+  tai_otoshi: { label: 'Tai otoshi', metrics: [
+    { key: 'rotation',    better: 'high', def: 140,  tol: 40,   w: 25, cue: 'Turn in more' },
+    { key: 'blockKnee',   better: 'high', def: 165,  tol: 30,   w: 20, cue: 'Straighten your blocking leg', sweep: true },
+    { key: 'blockWidth',  better: 'high', def: 0.90, tol: 0.40, w: 20, cue: 'Block wider', sweep: true },
+    { key: 'supportKnee', better: 'low',  def: 140,  tol: 30,   w: 20, cue: 'Bend your support knee' },
+    { key: 'pull',        better: 'high', def: 0.0,  tol: 0.40, w: 15, cue: 'Pull your sleeve hand' },
+  ] },
+};
+const throwOf = opts => THROWS[opts?.throw] ? opts.throw : 'harai_goshi';
+const throwMetrics = opts => THROWS[throwOf(opts)].metrics;
+
+function activeMetrics(opts) { return throwMetrics(opts).filter(M => !(M.sweep && !opts.scoreSweep) && !(M.key === 'pull' && !opts.scorePull)); }
 
 function scoreRep(m, ref, opts) {
   let tw = 0, ts = 0, worst = null, worstLoss = 0;
@@ -323,12 +378,12 @@ function scoreRep(m, ref, opts) {
     const target = ref && Number.isFinite(ref[M.key]) ? ref[M.key] : M.def;
     const v = m[M.key];
     if (!Number.isFinite(v)) continue;
-    const short = M.better === 'high' ? target - v : v - target;
+    const short = M.better === 'high' ? target - v : M.better === 'low' ? v - target : Math.abs(v - target);
     const s = clamp(1 - Math.max(0, short) / M.tol, 0, 1);
     parts[M.key] = s; targets[M.key] = target;
     tw += M.w; ts += M.w * s;
     const loss = M.w * (1 - s);
-    if (loss > worstLoss) { worstLoss = loss; worst = M; }
+    if (loss > worstLoss) { worstLoss = loss; worst = M.better === 'near' && v > target ? { ...M, cue: M.cueHigh } : M; }
   }
   const score = tw ? Math.round(100 * ts / tw) : 0;
   const good = score >= opts.goodScore || !worst;
@@ -346,13 +401,13 @@ function buildReference(repMetrics) {
 
 function fmtMetric(key, v) {
   if (!Number.isFinite(v)) return '–';
-  const M = METRICS.find(x => x.key === key);
+  const M = METRIC_INFO[key];
   return M && M.unit === '%' ? Math.round(v * 100) + '%' : Math.round(v) + '°';
 }
 // ======================= ANALYSIS-END =======================
 
 // Export for node tests (no-op in the browser)
-globalThis.__uchikomi = { Analyzer, scoreRep, buildReference, METRICS, fmtMetric };
+globalThis.__uchikomi = { Analyzer, scoreRep, buildReference, METRICS, THROWS, fmtMetric };
 
 // ======================= ANALYTICS (PostHog, only after the person taps OK) =======================
 // Nothing is loaded or sent until consent is 'yes'. Never captures the camera: session replay,
@@ -454,15 +509,19 @@ async function main() {
   // ---------- storage (localStorage on the phone) ----------
   const KEY = 'uchikomi.v1';
   const DEFAULT_SETTINGS = {
-    hand: 'right', camera: 'environment', model: 'full', sayRepNumber: false, scoreSweep: true, scorePull: true,
+    throw: 'harai_goshi', hand: 'right', camera: 'environment', model: 'full', sayRepNumber: false, scoreSweep: true, scorePull: true,
     goodScore: 90, enterDeg: 70, exitDeg: 40, minRepMs: 250, maxRepMs: 4000, calibMs: 1500, smooth: 0.35, showDebug: true, refReps: 3,
   };
   function load() {
     try {
       const d = JSON.parse(localStorage.getItem(KEY)) || {};
-      return { settings: { ...DEFAULT_SETTINGS, ...(d.settings || {}) }, reference: d.reference || null, sessions: d.sessions || [] };
-    } catch { return { settings: { ...DEFAULT_SETTINGS }, reference: null, sessions: [] }; }
+      const references = d.references || (d.reference ? { harai_goshi: d.reference } : {}); // v1 had one reference, for Harai goshi
+      return { settings: { ...DEFAULT_SETTINGS, ...(d.settings || {}) }, references, sessions: d.sessions || [] };
+    } catch { return { settings: { ...DEFAULT_SETTINGS }, references: {}, sessions: [] }; }
   }
+  const curThrow = () => throwOf(db.settings);
+  const throwLabel = t => THROWS[THROWS[t] ? t : 'harai_goshi'].label;
+  const curRef = () => db.references[curThrow()] || null;
   let db = load();
   function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { toast('Could not save: ' + e.message); } }
   try { navigator.storage?.persist?.(); } catch {}
@@ -538,10 +597,10 @@ async function main() {
     mirror = !file && db.settings.camera === 'user';
     video.classList.toggle('mirror', mirror); canvas.classList.toggle('mirror', mirror);
     analyzer = new Analyzer(db.settings);
-    session = { id: Date.now(), date: new Date().toISOString(), hand: db.settings.hand, usedReference: !!db.reference, reps: [] };
+    session = { id: Date.now(), date: new Date().toISOString(), throw: curThrow(), hand: db.settings.hand, usedReference: !!curRef(), reps: [] };
     refReps = []; lastVT = -1; lastLm = null;
     running = true; lockScreen(); runT0 = performance.now();
-    if (m === 'drill') track('drill started', { hand: db.settings.hand, used_reference: !!db.reference, camera: db.settings.camera, model: db.settings.model });
+    if (m === 'drill') track('drill started', { throw: curThrow(), hand: db.settings.hand, used_reference: !!curRef(), camera: db.settings.camera, model: db.settings.model });
     setStatus(m === 'refvideo' ? 'First second of the video should be standing still in kamae' : 'Stand still in kamae, facing the pole');
     requestAnimationFrame(loop);
   }
@@ -588,22 +647,22 @@ async function main() {
   function renderDebug() {
     const L = analyzer.live || {};
     const f = (k) => fmtMetric(k, L[k]);
-    $('debug').textContent = `state   ${L.state || ''}\nturn    ${Number.isFinite(L.rot) ? Math.round(L.rot) + '°' : '–'}\nhips    ${f('hipDrop')}\nsup knee ${f('supportKnee')}\nsweep   ${f('sweepHeight')}  leg ${f('sweepKnee')}\npull    ${f('pull')}`;
+    $('debug').textContent = `state   ${L.state || ''}\nturn    ${Number.isFinite(L.rot) ? Math.round(L.rot) + '°' : '–'}\nhips    ${f('hipDrop')}\nsup knee ${f('supportKnee')}\nsweep   ${f('sweepHeight')}  leg ${f('sweepKnee')}\nknees   ${f('bothKnees')}  block ${f('blockWidth')}\npull    ${f('pull')}`;
   }
 
   function handle(ev) {
     if (!ev) return;
     if (ev.type === 'calibrated') {
       calibS = Math.round((performance.now() - runT0) / 100) / 10;
-      if (calibS > 10) track('calibration slow', { mode, seconds: calibS });
-      setStatus(mode === 'drill' ? (db.reference ? 'Scoring against your reference' : 'No reference yet, using default targets') : `Do ${db.settings.refReps} clean reps`);
+      if (calibS > 10) track('calibration slow', { mode, throw: curThrow(), seconds: calibS });
+      setStatus(mode === 'drill' ? (curRef() ? `${throwLabel(curThrow())}: scoring against your reference` : `${throwLabel(curThrow())}: no reference yet, using default targets`) : `Do ${db.settings.refReps} clean reps`);
       if (mode !== 'refvideo') say(mode === 'drill' ? 'Go' : `Go. Do ${db.settings.refReps} clean reps`);
       return;
     }
     if (ev.type === 'discard') { setStatus('Rep ignored: ' + ev.reason); return; }
     if (ev.type === 'rep') {
       if (mode === 'drill') {
-        const sc = scoreRep(ev.metrics, db.reference?.metrics, db.settings);
+        const sc = scoreRep(ev.metrics, curRef()?.metrics, db.settings);
         const rep = { n: session.reps.length + 1, t: Date.now(), metrics: ev.metrics, score: sc.score, cue: sc.cue, cueKey: sc.cueKey, parts: sc.parts };
         session.reps.push(rep);
         $('repCount').textContent = rep.n;
@@ -626,19 +685,19 @@ async function main() {
       toast(analyzer?.base ? 'No reps detected. Check the angle and try again.' : 'Couldn\'t calibrate. The video needs ~1.5 s of standing still at the start.', 5000);
       return;
     }
-    db.reference = { metrics: buildReference(refReps), source: fromVideo ? 'video' : 'live', reps: refReps.length, date: new Date().toISOString(), hand: db.settings.hand };
-    track('reference recorded', { source: db.reference.source, reps: refReps.length });
+    db.references[curThrow()] = { metrics: buildReference(refReps), source: fromVideo ? 'video' : 'live', reps: refReps.length, date: new Date().toISOString(), hand: db.settings.hand };
+    track('reference recorded', { throw: curThrow(), source: fromVideo ? 'video' : 'live', reps: refReps.length });
     save(); say('Reference saved'); toast(`Reference saved from ${refReps.length} rep${refReps.length > 1 ? 's' : ''}`);
     stopRun(false); renderHome();
   }
 
   function stopRun(keepSession = true) {
     const wasRunning = running;
-    if (wasRunning && analyzer && !analyzer.base) track('calibration failed', { mode, seconds_waited: Math.round((performance.now() - runT0) / 1000) });
+    if (wasRunning && analyzer && !analyzer.base) track('calibration failed', { mode, throw: curThrow(), seconds_waited: Math.round((performance.now() - runT0) / 1000) });
     if (wasRunning && mode === 'drill') {
       const st = sessionStats(session);
       track('drill ended', { duration_s: Math.round((Date.now() - tapT0) / 1000), reps: st.n, avg_score: st.n ? st.avg : null, best_score: st.n ? st.best : null,
-        used_reference: session.usedReference, hand: session.hand, calibration_s: calibS });
+        throw: session.throw, used_reference: session.usedReference, hand: session.hand, calibration_s: calibS });
     }
     running = false; unlockScreen();
     try { stream?.getTracks().forEach(t => t.stop()); } catch {}
@@ -655,26 +714,27 @@ async function main() {
 
   // ---------- home ----------
   function renderHome() {
-    const r = db.reference;
+    const r = curRef();
+    $('throwSel').value = curThrow();
     $('refCard').innerHTML = r
-      ? `<b>Reference</b> <span class="muted">· ${r.source}, ${r.reps} rep${r.reps > 1 ? 's' : ''}, ${fmtDate(r.date)}${r.hand !== db.settings.hand ? ' · ⚠️ recorded ' + r.hand + '-handed' : ''}</span>
-         <div class="chips">${METRICS.map(M => `<span class="chip">${M.label} ${fmtMetric(M.key, r.metrics[M.key])}</span>`).join('')}</div>`
-      : `<b>No reference yet</b><div class="muted">Reps are scored against rough default targets until you record one.</div>`;
+      ? `<b>${throwLabel(curThrow())} reference</b> <span class="muted">· ${r.source}, ${r.reps} rep${r.reps > 1 ? 's' : ''}, ${fmtDate(r.date)}${r.hand !== db.settings.hand ? ' · ⚠️ recorded ' + r.hand + '-handed' : ''}</span>
+         <div class="chips">${throwMetrics(db.settings).map(M => `<span class="chip">${METRIC_INFO[M.key].label} ${fmtMetric(M.key, r.metrics[M.key])}</span>`).join('')}</div>`
+      : `<b>No ${throwLabel(curThrow())} reference yet</b><div class="muted">Reps are scored against rough default targets until you record one.</div>`;
   }
 
   // ---------- history ----------
   function sessionStats(s) { const sc = s.reps.map(r => r.score); return { n: sc.length, avg: sc.length ? Math.round(mean(sc)) : 0, best: sc.length ? Math.max(...sc) : 0 }; }
 
   function renderHistory() {
-    const all = db.sessions.flatMap(s => s.reps.map(r => ({ ...r, sid: s.id, date: s.date })));
+    const all = db.sessions.flatMap(s => s.reps.map(r => ({ ...r, sid: s.id, date: s.date, throw: s.throw })));
     const top = all.sort((a, b) => b.score - a.score).slice(0, 5);
     let h = '';
     if (!db.sessions.length) h = '<p class="muted">No sessions yet. Go drill!</p>';
     else {
-      h += '<h2>All-time best reps</h2>' + top.map(r => `<div class="card"><span class="score s-${sClass(r.score)}">${r.score}</span> <span class="muted">· rep ${r.n} · ${fmtDate(r.date)}</span></div>`).join('');
+      h += '<h2>All-time best reps</h2>' + top.map(r => `<div class="card"><span class="score s-${sClass(r.score)}">${r.score}</span> <span class="muted">· ${throwLabel(r.throw)} · rep ${r.n} · ${fmtDate(r.date)}</span></div>`).join('');
       h += '<h2>Sessions</h2>' + db.sessions.map(s => {
         const st = sessionStats(s);
-        return `<button class="card" style="text-align:left" data-sid="${s.id}"><div style="display:flex;justify-content:space-between"><span>${fmtDate(s.date)}</span><span class="score s-${sClass(st.avg)}">${st.avg}</span></div>
+        return `<button class="card" style="text-align:left" data-sid="${s.id}"><div style="display:flex;justify-content:space-between"><span>${throwLabel(s.throw)} · ${fmtDate(s.date)}</span><span class="score s-${sClass(st.avg)}">${st.avg}</span></div>
           <div class="muted">${st.n} reps · best ${st.best}${s.usedReference ? '' : ' · default targets'}</div></button>`;
       }).join('');
     }
@@ -687,7 +747,7 @@ async function main() {
     const s = db.sessions.find(x => x.id === id); if (!s) return;
     detailFrom = $('history').classList.contains('hidden') ? 'home' : 'history';
     const st = sessionStats(s);
-    $('detailTitle').textContent = fmtDate(s.date);
+    $('detailTitle').textContent = `${throwLabel(s.throw)} · ${fmtDate(s.date)}`;
     const cueCounts = {}; s.reps.forEach(r => { if (r.cueKey) cueCounts[r.cue] = (cueCounts[r.cue] || 0) + 1; });
     const topCues = Object.entries(cueCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
     let h = `<div class="card"><div class="row"><div><div class="muted">Reps</div><div class="score">${st.n}</div></div>
@@ -703,9 +763,10 @@ async function main() {
     $('detailBody').innerHTML = h;
     $('detailBody').querySelectorAll('[data-ref]').forEach(b => b.onclick = () => {
       const r = s.reps.find(x => x.n === +b.dataset.ref);
-      db.reference = { metrics: { ...r.metrics }, source: `rep ${r.n} on ${fmtDate(s.date)}`, reps: 1, date: new Date().toISOString(), hand: s.hand || db.settings.hand };
-      track('reference recorded', { source: 'session rep', reps: 1 });
-      save(); toast('Reference updated'); renderHome();
+      const t = THROWS[s.throw] ? s.throw : 'harai_goshi';
+      db.references[t] = { metrics: { ...r.metrics }, source: `rep ${r.n} on ${fmtDate(s.date)}`, reps: 1, date: new Date().toISOString(), hand: s.hand || db.settings.hand };
+      track('reference recorded', { throw: t, source: 'session rep', reps: 1 });
+      save(); toast(`${throwLabel(t)} reference updated`); renderHome();
     });
     $('delSession').onclick = () => { if (confirm('Delete this session?')) { db.sessions = db.sessions.filter(x => x.id !== id); save(); renderHistory(); show('history'); } };
     show('detail');
@@ -714,7 +775,7 @@ async function main() {
 
   // ---------- settings ----------
   const FIELDS = [
-    ['hand', 'Throwing side', 'Right = sweep with right leg', 'select', [['right', 'Right'], ['left', 'Left']]],
+    ['hand', 'Throwing side', 'Right = right-handed throw (sweep or block with the right leg)', 'select', [['right', 'Right'], ['left', 'Left']]],
     ['camera', 'Camera', '', 'select', [['environment', 'Back'], ['user', 'Front (selfie)']]],
     ['model', 'Pose model', 'Lite is faster, Full is more accurate', 'select', [['lite', 'Lite'], ['full', 'Full'], ['heavy', 'Heavy (slow)']]],
     ['scoreSweep', 'Score the sweep', 'Turn off if you only drill the entry', 'check'],
@@ -743,10 +804,12 @@ async function main() {
       save(); renderHome();
     });
     $('consentToggle').checked = hasConsent();
-    $('resetSettings').onclick = () => { db.settings = { ...DEFAULT_SETTINGS }; track('settings changed', { setting: 'all', value: 'reset' }); save(); renderSettings(); toast('Settings reset'); };
+    $('resetSettings').onclick = () => { db.settings = { ...DEFAULT_SETTINGS, throw: db.settings.throw }; track('settings changed', { setting: 'all', value: 'reset' }); save(); renderSettings(); toast('Settings reset'); };
   }
 
   // ---------- wiring ----------
+  $('throwSel').innerHTML = Object.entries(THROWS).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('');
+  $('throwSel').onchange = e => { db.settings.throw = e.target.value; save(); renderHome(); track('settings changed', { setting: 'throw', value: e.target.value }); };
   $('startBtn').onclick = () => startRun('drill');
   $('refLiveBtn').onclick = () => startRun('reference');
   $('refFileBtn').onclick = () => $('refFile').click();
@@ -760,7 +823,7 @@ async function main() {
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `uchikomi-${new Date().toISOString().slice(0, 10)}.json`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   };
-  $('clearRefBtn').onclick = () => { if (confirm('Clear the reference?')) { db.reference = null; save(); renderHome(); toast('Reference cleared'); } };
+  $('clearRefBtn').onclick = () => { const t = curThrow(); if (confirm(`Clear the ${throwLabel(t)} reference?`)) { delete db.references[t]; save(); renderHome(); toast(`${throwLabel(t)} reference cleared`); } };
   $('clearAllBtn').onclick = () => { if (confirm('Delete ALL sessions? This can\'t be undone.')) { db.sessions = []; save(); toast('All sessions deleted'); } };
 
   renderHome();

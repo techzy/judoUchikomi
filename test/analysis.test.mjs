@@ -17,7 +17,7 @@ const js = html.split('<script type="module">')[1].split('</script>')[0];
 const tmp = join(mkdtempSync(join(tmpdir(), 'uchikomi-')), 'app.mjs');
 writeFileSync(tmp, js);
 await import(pathToFileURL(tmp).href);
-const { Analyzer, scoreRep, buildReference } = globalThis.__uchikomi;
+const { Analyzer, scoreRep, buildReference, THROWS, METRICS } = globalThis.__uchikomi;
 
 const OPTS = { hand: 'right', calibMs: 1500, smooth: 0.35, enterDeg: 70, exitDeg: 40, minRepMs: 250, maxRepMs: 4000,
   scoreSweep: true, scorePull: true, goodScore: 90 };
@@ -107,4 +107,43 @@ test('turning off sweep scoring ignores the sweep', () => {
   const m = simulate([{ ...GOOD, lift: 0 }]).find(e => e.type === 'rep').metrics;
   assert.equal(scoreRep(m, null, { ...OPTS, scoreSweep: false }).cue, 'Good rep');
   assert.equal(scoreRep(m, null, OPTS).cue, 'Sweep higher');
+});
+
+// ---------- other throws ----------
+const SEOI_GOOD = { yaw: 175, drop: 0.22, supBend: 50, lift: 0, sweepBend: 50, pull: 0.1 };
+
+test('every throw only scores known metrics', () => {
+  const known = new Set(METRICS.map(M => M.key));
+  for (const [k, t] of Object.entries(THROWS)) {
+    assert.ok(t.label && t.metrics.length, k);
+    for (const M of t.metrics) assert.ok(known.has(M.key), `${k}: ${M.key}`);
+  }
+});
+
+test('seoi nage: deep two-knee rep is good and the sweep is not scored', () => {
+  const m = simulate([SEOI_GOOD]).find(e => e.type === 'rep').metrics;
+  for (const t of ['ippon_seoi_nage', 'morote_seoi_nage']) assert.equal(scoreRep(m, null, { ...OPTS, throw: t }).cue, 'Good rep', t);
+  assert.notEqual(scoreRep(m, null, OPTS).cue, 'Good rep'); // as harai goshi it lacks a sweep
+});
+
+test('seoi nage: one straight knee gets "Bend both knees"', () => {
+  const m = simulate([{ ...SEOI_GOOD, sweepBend: 5 }]).find(e => e.type === 'rep').metrics;
+  assert.equal(scoreRep(m, null, { ...OPTS, throw: 'ippon_seoi_nage' }).cue, 'Bend both knees');
+});
+
+test('uchi mata: support knee is cued from both sides', () => {
+  const o = { ...OPTS, throw: 'uchi_mata' };
+  const base = { rotation: 160, sweepHeight: 0.6, sweepKnee: 170, supportKnee: 155, pull: 0.1 };
+  assert.equal(scoreRep(base, null, o).cue, 'Good rep');
+  assert.equal(scoreRep({ ...base, supportKnee: 115 }, null, o).cue, "Don't sink so deep");
+  assert.equal(scoreRep({ ...base, supportKnee: 180 }, null, o).cue, 'Bend your support knee slightly');
+});
+
+test('tai otoshi: measures the block and cues a narrow one', () => {
+  const m = simulate([{ ...GOOD, yaw: 150 }]).find(e => e.type === 'rep').metrics;
+  assert.ok(Number.isFinite(m.blockWidth) && Number.isFinite(m.blockKnee), JSON.stringify(m));
+  const o = { ...OPTS, throw: 'tai_otoshi' };
+  const base = { rotation: 150, blockKnee: 170, blockWidth: 1.0, supportKnee: 130, pull: 0.1 };
+  assert.equal(scoreRep(base, null, o).cue, 'Good rep');
+  assert.equal(scoreRep({ ...base, blockWidth: 0.3 }, null, o).cue, 'Block wider');
 });

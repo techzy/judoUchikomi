@@ -1,6 +1,17 @@
 # Uchikomi Coach
 
-A phone web app that gives live audio coaching while drilling **harai goshi uchikomi** (repeated throw entries, using a band around a pole).
+A phone web app that gives live audio coaching while drilling **uchikomi** (repeated throw entries, using a band around a pole).
+
+Throws (pick one from the dropdown on the home screen):
+
+| Throw | What it coaches |
+|---|---|
+| Harai goshi | Hip depth, turn-in, sweep height, straight sweeping leg, support-knee bend, pull hand |
+| Ippon seoi nage / Morote seoi nage | Full turn-in, hips low, both knees bent, pull hand (no sweep) |
+| Uchi mata | Turn-in, high sweep, straight sweeping leg, slight (not deep) support-knee bend, pull hand |
+| Tai otoshi | Turn-in, straight and wide blocking leg, support-knee bend, pull hand |
+
+Each throw keeps its **own reference**. A reference saved before throws were added belongs to Harai goshi. Osoto gari isn't supported yet: it doesn't turn in, so it needs a different rep detector.
 
 Live: **https://judo.lifeofjeso.ca**
 
@@ -9,7 +20,7 @@ Live: **https://judo.lifeofjeso.ca**
 - **MediaPipe Pose Landmarker** runs on the device in the browser. It's loaded at runtime from CDNs:
   - JS and WebAssembly: `cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/...`
   - Model: `storage.googleapis.com/mediapipe-models/pose_landmarker/...`
-- The app calibrates while you stand still, detects each rep by how far your body turns, and scores hip depth, turn-in, sweep height, sweeping-leg straightness, support-knee bend and the pull hand. It speaks one cue per rep through the browser's speech engine.
+- The app calibrates while you stand still, detects each rep by how far your body turns, and scores it with the metrics for the selected throw (defined in the `THROWS` table in `index.html`). It speaks one cue per rep through the browser's speech engine.
 - Sessions, settings and the reference are saved in `localStorage` on the phone. There's no backend.
 - The camera only works over HTTPS (Vercel provides it).
 
@@ -22,13 +33,13 @@ Live: **https://judo.lifeofjeso.ca**
   | Event | Properties |
   |---|---|
   | `$pageview` | (standard) |
-  | `drill started` | `hand`, `used_reference`, `camera`, `model` |
-  | `drill ended` | `duration_s` (Start drill → End), `reps`, `avg_score`, `best_score`, `used_reference`, `hand`, `calibration_s` |
+  | `drill started` | `throw`, `hand`, `used_reference`, `camera`, `model` |
+  | `drill ended` | `duration_s` (Start drill → End), `reps`, `avg_score`, `best_score`, `throw`, `used_reference`, `hand`, `calibration_s` |
   | `camera blocked` | `mode`, `error` |
-  | `calibration slow` | `mode`, `seconds` (sent when calibration takes over 10 s) |
-  | `calibration failed` | `mode`, `seconds_waited` (the run ended before calibration finished) |
-  | `settings changed` | `setting`, `value` |
-  | `reference recorded` | `source` (`live`, `video` or `session rep`), `reps` |
+  | `calibration slow` | `mode`, `throw`, `seconds` (sent when calibration takes over 10 s) |
+  | `calibration failed` | `mode`, `throw`, `seconds_waited` (the run ended before calibration finished) |
+  | `settings changed` | `setting`, `value` (choosing a throw sends `setting: throw`) |
+  | `reference recorded` | `throw`, `source` (`live`, `video` or `session rep`), `reps` |
 
 - **After-session feedback:** when a drill with at least one rep ends, a popup asks *"Is there anything you wish this app would do?"* with a text box, **Send** and a close **×**. It appears after the first finished drill, then at most once every 30 days (`uchikomi.feedbackAt`), and only for people who said OK to analytics. Answers are sent as responses to the PostHog API survey **"Uchikomi Coach: after-session wish"**, so they show up under Surveys in PostHog.
 
