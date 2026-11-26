@@ -61,6 +61,10 @@
   #cue { font-size: 30px; font-weight: 800; text-align: center; min-height: 40px; margin-bottom: 8px; transition: transform .15s; }
   #cue.pop { transform: scale(1.08); }
   #status { text-align: center; color: #cfd6e0; font-size: 15px; margin-bottom: 6px; min-height: 20px; }
+  #flipBtn { position: absolute; left: 50%; top: calc(env(safe-area-inset-top) + 12px); transform: translateX(-50%); z-index: 5;
+    width: 52px; height: 52px; padding: 0; margin: 0; border-radius: 999px; display: flex; align-items: center; justify-content: center;
+    background: #ffffff22; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  #flipBtn:disabled { opacity: .4; }
   #endBtn { background: #ffffff22; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); margin: 0; }
   #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 18px; background: #000c; }
   #toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 90px); transform: translateX(-50%);
@@ -126,6 +130,12 @@
     <div id="status"></div>
     <button id="endBtn">End</button>
   </div>
+  <button id="flipBtn" class="hidden" aria-label="Switch camera">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M20 7h-3l-2-3H9L7 7H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1z"/>
+      <path d="M9 13a3 3 0 0 1 5.2-2"/><path d="M15 13a3 3 0 0 1-5.2 2"/><path d="M14.5 9.5v1.7h-1.7"/><path d="M9.5 16.5v-1.7h1.7"/>
+    </svg>
+  </button>
   <div id="loading" class="hidden">Loading pose model…</div>
 </div>
 
@@ -509,14 +519,16 @@ async function main() {
   // ---------- storage (localStorage on the phone) ----------
   const KEY = 'uchikomi.v1';
   const DEFAULT_SETTINGS = {
-    throw: 'harai_goshi', hand: 'right', camera: 'environment', model: 'full', sayRepNumber: false, scoreSweep: true, scorePull: true,
+    throw: 'harai_goshi', hand: 'right', camera: 'user', model: 'full', sayRepNumber: false, scoreSweep: true, scorePull: true,
     goodScore: 90, enterDeg: 70, exitDeg: 40, minRepMs: 250, maxRepMs: 4000, calibMs: 1500, smooth: 0.35, showDebug: true, refReps: 3,
   };
   function load() {
     try {
       const d = JSON.parse(localStorage.getItem(KEY)) || {};
       const references = d.references || (d.reference ? { harai_goshi: d.reference } : {}); // v1 had one reference, for Harai goshi
-      return { settings: { ...DEFAULT_SETTINGS, ...(d.settings || {}) }, references, sessions: d.sessions || [] };
+      const settings = { ...DEFAULT_SETTINGS, ...(d.settings || {}) };
+      if (!settings.frontCamDefault) { settings.camera = 'user'; settings.frontCamDefault = true; } // one-time move to the new front-camera default
+      return { settings, references, sessions: d.sessions || [] };
     } catch { return { settings: { ...DEFAULT_SETTINGS }, references: {}, sessions: [] }; }
   }
   const curThrow = () => throwOf(db.settings);
@@ -576,6 +588,7 @@ async function main() {
     $('repCount').textContent = '0'; $('lastScore').textContent = '–'; $('cue').textContent = '';
     $('hudLeftLbl').textContent = m === 'drill' ? 'Reps' : 'Ref reps';
     $('debug').classList.toggle('hidden', !db.settings.showDebug);
+    $('flipBtn').classList.add('hidden');
     setStatus(m === 'refvideo' ? 'Loading video…' : 'Starting camera…');
     try {
       await ensureLandmarker();
@@ -584,7 +597,7 @@ async function main() {
         video.srcObject = null; video.src = URL.createObjectURL(file); video.loop = false;
         video.onended = () => finishReference(true);
       } else {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: db.settings.camera, frameRate: { ideal: 30 } }, audio: false });
+        stream = await openCamera(db.settings.camera);
         video.src = ''; video.srcObject = stream; video.onended = null;
       }
       await video.play();
@@ -596,6 +609,7 @@ async function main() {
     }
     mirror = !file && db.settings.camera === 'user';
     video.classList.toggle('mirror', mirror); canvas.classList.toggle('mirror', mirror);
+    if (!file) showFlipIfPossible();
     analyzer = new Analyzer(db.settings);
     session = { id: Date.now(), date: new Date().toISOString(), throw: curThrow(), hand: db.settings.hand, usedReference: !!curRef(), reps: [] };
     refReps = []; lastVT = -1; lastLm = null;
@@ -606,6 +620,36 @@ async function main() {
   }
 
   function setStatus(s) { $('status').textContent = s; }
+
+  // ---------- front / back camera ----------
+  async function showFlipIfPossible() {
+    try {
+      const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      $('flipBtn').classList.toggle('hidden', cams.length < 2 || !running);
+    } catch {}
+  }
+  const openCamera = facing => navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, frameRate: { ideal: 30 } }, audio: false });
+  async function flipCamera() {
+    if (!running || mode === 'refvideo' || !stream) return;
+    const from = db.settings.camera, to = from === 'user' ? 'environment' : 'user';
+    $('flipBtn').disabled = true;
+    try {
+      stream.getTracks().forEach(t => t.stop()); // iPhones can't keep both cameras open at once
+      try { stream = await openCamera(to); db.settings.camera = to; }
+      catch (e) { console.error(e); stream = await openCamera(from); toast(`Couldn't switch to the ${to === 'user' ? 'front' : 'back'} camera`); }
+      video.srcObject = stream; await video.play();
+      if (db.settings.camera !== from) {
+        save(); track('settings changed', { setting: 'camera', value: db.settings.camera, via: 'flip button' });
+        mirror = db.settings.camera === 'user';
+        video.classList.toggle('mirror', mirror); canvas.classList.toggle('mirror', mirror);
+        // New view = new calibration. Reps already done stay in the session.
+        analyzer = new Analyzer(db.settings); lastVT = -1; lastLm = null; runT0 = performance.now(); calibS = null;
+        say('Stand still, facing the pole'); setStatus('Camera switched. Stand still in kamae, facing the pole');
+      }
+    } catch (e) {
+      console.error(e); toast('Camera stopped. Ending the drill.', 4000); stopRun(true);
+    } finally { $('flipBtn').disabled = false; }
+  }
 
   function loop() {
     if (!running) return;
@@ -700,7 +744,7 @@ async function main() {
       track('drill ended', { duration_s: session.durationS, reps: st.n, avg_score: st.n ? st.avg : null, best_score: st.n ? st.best : null,
         throw: session.throw, used_reference: session.usedReference, hand: session.hand, calibration_s: calibS });
     }
-    running = false; unlockScreen();
+    running = false; unlockScreen(); $('flipBtn').classList.add('hidden');
     try { stream?.getTracks().forEach(t => t.stop()); } catch {}
     stream = null; video.pause(); video.onended = null;
     if (video.src && video.src.startsWith('blob:')) URL.revokeObjectURL(video.src);
@@ -839,7 +883,7 @@ async function main() {
   // ---------- settings ----------
   const FIELDS = [
     ['hand', 'Throwing side', 'Right = right-handed throw (sweep or block with the right leg)', 'select', [['right', 'Right'], ['left', 'Left']]],
-    ['camera', 'Camera', '', 'select', [['environment', 'Back'], ['user', 'Front (selfie)']]],
+    ['camera', 'Camera', 'You can also flip it on the drill screen', 'select', [['user', 'Front (selfie)'], ['environment', 'Back']]],
     ['model', 'Pose model', 'Lite is faster, Full is more accurate', 'select', [['lite', 'Lite'], ['full', 'Full'], ['heavy', 'Heavy (slow)']]],
     ['scoreSweep', 'Score the sweep', 'Turn off if you only drill the entry', 'check'],
     ['scorePull', 'Score the pull hand', 'Turn off if the band setup makes it meaningless', 'check'],
@@ -878,6 +922,7 @@ async function main() {
   $('refFileBtn').onclick = () => $('refFile').click();
   $('refFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) startRun('refvideo', f); };
   $('endBtn').onclick = () => stopRun(true);
+  $('flipBtn').onclick = flipCamera;
   $('historyBtn').onclick = () => { renderHistory(); show('history'); };
   $('settingsBtn').onclick = () => { renderSettings(); show('settings'); };
   document.querySelectorAll('.backBtn').forEach(b => b.onclick = () => { show('home'); renderHome(); });

@@ -51,7 +51,7 @@ The session summary has a **Share session** button. It draws a square 1080×1080
 ## Using it on an iPhone
 
 1. Open the site in **Safari**, then Share → **Add to Home Screen**. This opens it full-screen and stops Safari wiping saved sessions after about 7 days of not visiting the site.
-2. Allow the camera when asked.
+2. Allow the camera when asked. The app uses the **front camera** by default, so you can see the screen. Tap the round flip button at the top of the drill screen to switch between front and back. Switching restarts calibration (stand still again), and reps already done stay in the session. The choice is remembered, and you can also change it in Settings.
 3. Prop the phone at about 45° to the pole with your whole body in frame. Tap **Start drill** and stand still facing the pole until it says "Go".
 4. If you don't hear cues, check the volume and the silent switch.
 5. If something fails (camera, model loading, speech), connect the phone to Safari Web Inspector on a Mac to see the console errors.
