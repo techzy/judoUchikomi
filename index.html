@@ -64,6 +64,18 @@
   #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 18px; background: #000c; }
   #toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 90px); transform: translateX(-50%);
     background: #222a; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); padding: 10px 14px; border-radius: 10px; font-size: 14px; z-index: 50; max-width: 90%; }
+
+  /* Popups (privacy choice, feedback) */
+  .modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+    padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px); background: #000b; }
+  .sheet { position: relative; width: 100%; max-width: 420px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px; }
+  .sheet h2 { margin: 0 0 8px; padding-right: 32px; }
+  .sheet .row button:not(.primary) { background: var(--bg); border: 1px solid var(--line); }
+  .sheet p { margin: 0 0 10px; color: var(--muted); }
+  .sheet .closeX { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; padding: 0; margin: 0; border-radius: 999px;
+    background: var(--bg); color: var(--muted); font-size: 20px; line-height: 36px; }
+  .sheet textarea { width: 100%; min-height: 110px; margin: 6px 0 0; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit; resize: vertical; }
 </style>
 </head>
 <body>
@@ -96,7 +108,7 @@
 </div>
 
 <!-- DRILL -->
-<div id="drill" class="screen hidden">
+<div id="drill" class="screen hidden ph-no-capture">
   <div class="stage">
     <video id="video" playsinline muted autoplay></video>
     <canvas id="canvas"></canvas>
@@ -130,6 +142,8 @@
 <div id="settings" class="screen hidden">
   <div class="topbar"><button class="backBtn">‹ Back</button><h1 style="margin:0">Settings</h1></div>
   <div id="settingsBody"></div>
+  <h2>Privacy</h2>
+  <label class="field"><span>Share anonymous usage stats<small>How long you train, rep counts, scores. Never camera video.</small></span><input type="checkbox" id="consentToggle"></label>
   <h2>Data</h2>
   <button id="exportBtn">Export all data (JSON)</button>
   <button id="clearRefBtn">Clear reference</button>
@@ -137,6 +151,29 @@
 </div>
 
 <div id="toast" class="hidden"></div>
+
+<!-- PRIVACY CHOICE (first open) -->
+<div id="consentModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="consentTitle">
+  <div class="sheet">
+    <h2 id="consentTitle">Help improve Uchikomi Coach?</h2>
+    <p>We'd like to collect anonymous usage stats (how long you train, rep counts, scores) to make the app better.</p>
+    <p>Your camera video never leaves your phone and is never recorded.</p>
+    <div class="row">
+      <button id="consentNo">No thanks</button>
+      <button class="primary" id="consentYes">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- AFTER-SESSION FEEDBACK -->
+<div id="feedbackModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
+  <div class="sheet">
+    <button class="closeX" id="feedbackClose" aria-label="Close">×</button>
+    <h2 id="feedbackTitle">Is there anything you wish this app would do?</h2>
+    <textarea id="feedbackText" maxlength="2000" placeholder="Type your idea…"></textarea>
+    <button class="primary" id="feedbackSend">Send</button>
+  </div>
+</div>
 
 <script type="module">
 // ======================= ANALYSIS-START (pure logic, no DOM) =======================
@@ -316,7 +353,98 @@ function fmtMetric(key, v) {
 
 // Export for node tests (no-op in the browser)
 globalThis.__uchikomi = { Analyzer, scoreRep, buildReference, METRICS, fmtMetric };
-if (typeof document === 'undefined') { /* running under tests */ } else { main(); }
+
+// ======================= ANALYTICS (PostHog, only after the person taps OK) =======================
+// Nothing is loaded or sent until consent is 'yes'. Never captures the camera: session replay,
+// autocapture, heatmaps and console logs are all off, and #drill carries ph-no-capture anyway.
+const PH = {
+  key: 'phc_CyEjfFQyqEUQFXoVdR283dURXmxN56cTwoVMMvpuviNU', // public project key, safe in client code
+  host: 'https://us.i.posthog.com',
+  lib: 'https://cdn.jsdelivr.net/npm/posthog-js@1.447.6/dist/module.mjs',
+};
+const SURVEY = { id: '01a21959-cabc-0000-beb8-143eaa01717a', qid: 'cebe0429-b16e-4f9e-bfdf-f3b22b13f4e9', question: 'Is there anything you wish this app would do?' };
+const CONSENT_KEY = 'uchikomi.consent';      // 'yes' | 'no' (unset = not asked yet)
+const FEEDBACK_KEY = 'uchikomi.feedbackAt';  // ms timestamp of the last time the feedback popup was shown
+const FEEDBACK_EVERY_MS = 30 * 864e5;        // first finished drill, then at most every 30 days
+
+function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+const hasConsent = () => lsGet(CONSENT_KEY) === 'yes';
+
+let ph = null, phLoading = null, submissionId = null;
+function loadPostHog() {
+  if (ph) return Promise.resolve(ph);
+  return phLoading ||= import(PH.lib).then(m => {
+    const p = m.default;
+    p.init(PH.key, {
+      api_host: PH.host,
+      person_profiles: 'identified_only',
+      capture_pageview: true,
+      autocapture: false,
+      disable_session_recording: true,
+      enable_recording_console_log: false,
+      enable_heatmaps: false,
+      capture_dead_clicks: false,
+      capture_performance: false,
+      disable_surveys: true,                  // the app draws its own feedback popup
+      disable_external_dependency_loading: true,
+    });
+    ph = p; return p;
+  }).catch(e => { console.warn('Analytics unavailable', e); phLoading = null; return null; });
+}
+
+function track(event, props) {
+  if (!hasConsent()) return;
+  loadPostHog().then(p => { try { p?.capture(event, props); } catch {} });
+}
+
+function setConsent(on) {
+  lsSet(CONSENT_KEY, on ? 'yes' : 'no');
+  if (on) loadPostHog().then(p => { try { if (p?.has_opted_out_capturing()) p.opt_in_capturing(); } catch {} });
+  else { try { ph?.opt_out_capturing(); } catch {} }
+}
+
+function initPrivacy() {
+  const $ = id => document.getElementById(id);
+  const choice = lsGet(CONSENT_KEY);
+  if (choice === 'yes') loadPostHog();
+  else if (choice !== 'no') $('consentModal').classList.remove('hidden');
+  const answer = on => { setConsent(on); $('consentModal').classList.add('hidden'); };
+  $('consentYes').onclick = () => answer(true);
+  $('consentNo').onclick = () => answer(false);
+  $('consentToggle').onchange = e => setConsent(e.target.checked);
+
+  // After-session feedback, recorded as responses to the PostHog survey above (API mode)
+  const close = () => $('feedbackModal').classList.add('hidden');
+  $('feedbackClose').onclick = () => { track('survey dismissed', { $survey_id: SURVEY.id }); close(); };
+  $('feedbackSend').onclick = () => {
+    const text = $('feedbackText').value.trim();
+    if (!text) { $('feedbackText').focus(); return; }
+    track('survey sent', {
+      $survey_id: SURVEY.id,
+      $survey_submission_id: submissionId,
+      $survey_completed: true,
+      $survey_questions: [{ id: SURVEY.qid, question: SURVEY.question }],
+      [`$survey_response_${SURVEY.qid}`]: text,
+    });
+    close();
+    $('toast').textContent = 'Thanks! Feedback sent'; $('toast').classList.remove('hidden');
+    setTimeout(() => $('toast').classList.add('hidden'), 2500);
+  };
+}
+
+// Called when a drill ends and its summary opens
+function askFeedback() {
+  if (!hasConsent()) return;
+  if (Date.now() - (Number(lsGet(FEEDBACK_KEY)) || 0) < FEEDBACK_EVERY_MS) return;
+  lsSet(FEEDBACK_KEY, String(Date.now()));
+  submissionId = crypto.randomUUID?.() || String(Date.now()) + Math.random().toString(16).slice(2);
+  document.getElementById('feedbackText').value = '';
+  document.getElementById('feedbackModal').classList.remove('hidden');
+  track('survey shown', { $survey_id: SURVEY.id });
+}
+
+if (typeof document === 'undefined') { /* running under tests */ } else { initPrivacy(); main(); }
 
 async function main() {
   const { PoseLandmarker, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/vision_bundle.mjs');
@@ -380,16 +508,19 @@ async function main() {
   // ---------- run loop ----------
   const video = $('video'), canvas = $('canvas'), ctx = canvas.getContext('2d');
   let running = false, mode = null, stream = null, analyzer = null, session = null, refReps = [], lastVT = -1, lastTs = 0, mirror = false, lastLm = null;
+  let tapT0 = 0, runT0 = 0, calibS = null; // analytics timings
 
   async function startRun(m, file) {
     say(m === 'refvideo' ? 'Processing video' : 'Stand still, facing the pole'); // unlocks speech inside the tap
-    mode = m; show('drill');
+    mode = m; show('drill'); tapT0 = Date.now(); calibS = null;
+    let stage = 'model';
     $('repCount').textContent = '0'; $('lastScore').textContent = '–'; $('cue').textContent = '';
     $('hudLeftLbl').textContent = m === 'drill' ? 'Reps' : 'Ref reps';
     $('debug').classList.toggle('hidden', !db.settings.showDebug);
     setStatus(m === 'refvideo' ? 'Loading video…' : 'Starting camera…');
     try {
       await ensureLandmarker();
+      stage = 'camera';
       if (file) {
         video.srcObject = null; video.src = URL.createObjectURL(file); video.loop = false;
         video.onended = () => finishReference(true);
@@ -400,6 +531,7 @@ async function main() {
       await video.play();
     } catch (e) {
       console.error(e); stopRun(false);
+      if (!file && stage === 'camera') track('camera blocked', { mode: m, error: e?.name || 'unknown' });
       toast(file ? 'Could not open that video.' : 'Camera blocked. Allow camera access for this site in Settings → Safari → Camera.', 5000);
       return;
     }
@@ -408,7 +540,8 @@ async function main() {
     analyzer = new Analyzer(db.settings);
     session = { id: Date.now(), date: new Date().toISOString(), hand: db.settings.hand, usedReference: !!db.reference, reps: [] };
     refReps = []; lastVT = -1; lastLm = null;
-    running = true; lockScreen();
+    running = true; lockScreen(); runT0 = performance.now();
+    if (m === 'drill') track('drill started', { hand: db.settings.hand, used_reference: !!db.reference, camera: db.settings.camera, model: db.settings.model });
     setStatus(m === 'refvideo' ? 'First second of the video should be standing still in kamae' : 'Stand still in kamae, facing the pole');
     requestAnimationFrame(loop);
   }
@@ -461,6 +594,8 @@ async function main() {
   function handle(ev) {
     if (!ev) return;
     if (ev.type === 'calibrated') {
+      calibS = Math.round((performance.now() - runT0) / 100) / 10;
+      if (calibS > 10) track('calibration slow', { mode, seconds: calibS });
       setStatus(mode === 'drill' ? (db.reference ? 'Scoring against your reference' : 'No reference yet, using default targets') : `Do ${db.settings.refReps} clean reps`);
       if (mode !== 'refvideo') say(mode === 'drill' ? 'Go' : `Go. Do ${db.settings.refReps} clean reps`);
       return;
@@ -492,11 +627,19 @@ async function main() {
       return;
     }
     db.reference = { metrics: buildReference(refReps), source: fromVideo ? 'video' : 'live', reps: refReps.length, date: new Date().toISOString(), hand: db.settings.hand };
+    track('reference recorded', { source: db.reference.source, reps: refReps.length });
     save(); say('Reference saved'); toast(`Reference saved from ${refReps.length} rep${refReps.length > 1 ? 's' : ''}`);
     stopRun(false); renderHome();
   }
 
   function stopRun(keepSession = true) {
+    const wasRunning = running;
+    if (wasRunning && analyzer && !analyzer.base) track('calibration failed', { mode, seconds_waited: Math.round((performance.now() - runT0) / 1000) });
+    if (wasRunning && mode === 'drill') {
+      const st = sessionStats(session);
+      track('drill ended', { duration_s: Math.round((Date.now() - tapT0) / 1000), reps: st.n, avg_score: st.n ? st.avg : null, best_score: st.n ? st.best : null,
+        used_reference: session.usedReference, hand: session.hand, calibration_s: calibS });
+    }
     running = false; unlockScreen();
     try { stream?.getTracks().forEach(t => t.stop()); } catch {}
     stream = null; video.pause(); video.onended = null;
@@ -504,7 +647,7 @@ async function main() {
     video.removeAttribute('src'); video.srcObject = null;
     if (keepSession && mode === 'drill' && session?.reps.length) {
       db.sessions.unshift(session); save();
-      openDetail(session.id); return;
+      openDetail(session.id); askFeedback(); return;
     }
     if (mode === 'reference' && keepSession && refReps.length) { finishReference(false); return; }
     show('home'); renderHome();
@@ -561,6 +704,7 @@ async function main() {
     $('detailBody').querySelectorAll('[data-ref]').forEach(b => b.onclick = () => {
       const r = s.reps.find(x => x.n === +b.dataset.ref);
       db.reference = { metrics: { ...r.metrics }, source: `rep ${r.n} on ${fmtDate(s.date)}`, reps: 1, date: new Date().toISOString(), hand: s.hand || db.settings.hand };
+      track('reference recorded', { source: 'session rep', reps: 1 });
       save(); toast('Reference updated'); renderHome();
     });
     $('delSession').onclick = () => { if (confirm('Delete this session?')) { db.sessions = db.sessions.filter(x => x.id !== id); save(); renderHistory(); show('history'); } };
@@ -595,9 +739,11 @@ async function main() {
     $('settingsBody').querySelectorAll('[data-k]').forEach(el => el.onchange = () => {
       const k = el.dataset.k;
       db.settings[k] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
+      track('settings changed', { setting: k, value: db.settings[k] });
       save(); renderHome();
     });
-    $('resetSettings').onclick = () => { db.settings = { ...DEFAULT_SETTINGS }; save(); renderSettings(); toast('Settings reset'); };
+    $('consentToggle').checked = hasConsent();
+    $('resetSettings').onclick = () => { db.settings = { ...DEFAULT_SETTINGS }; track('settings changed', { setting: 'all', value: 'reset' }); save(); renderSettings(); toast('Settings reset'); };
   }
 
   // ---------- wiring ----------

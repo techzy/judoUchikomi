@@ -13,6 +13,25 @@ Live: **https://judo.lifeofjeso.ca**
 - Sessions, settings and the reference are saved in `localStorage` on the phone. There's no backend.
 - The camera only works over HTTPS (Vercel provides it).
 
+## Privacy and analytics
+
+- On first open, a popup asks whether to share anonymous usage stats. **Nothing is loaded or sent until the person taps OK.** "No thanks" turns analytics off, and the choice can be changed later under Settings → Privacy. The choice is stored in `localStorage` under `uchikomi.consent`.
+- Analytics go to **PostHog** (US cloud, project "Default project"). `posthog-js` is pinned to `1.447.6` and loaded from jsdelivr. Session replay, autocapture, heatmaps and console-log capture are all **off**. The camera feed is never recorded or sent anywhere, and the drill screen also has the `ph-no-capture` class as a backstop.
+- Events:
+
+  | Event | Properties |
+  |---|---|
+  | `$pageview` | (standard) |
+  | `drill started` | `hand`, `used_reference`, `camera`, `model` |
+  | `drill ended` | `duration_s` (Start drill → End), `reps`, `avg_score`, `best_score`, `used_reference`, `hand`, `calibration_s` |
+  | `camera blocked` | `mode`, `error` |
+  | `calibration slow` | `mode`, `seconds` (sent when calibration takes over 10 s) |
+  | `calibration failed` | `mode`, `seconds_waited` (the run ended before calibration finished) |
+  | `settings changed` | `setting`, `value` |
+  | `reference recorded` | `source` (`live`, `video` or `session rep`), `reps` |
+
+- **After-session feedback:** when a drill with at least one rep ends, a popup asks *"Is there anything you wish this app would do?"* with a text box, **Send** and a close **×**. It appears after the first finished drill, then at most once every 30 days (`uchikomi.feedbackAt`), and only for people who said OK to analytics. Answers are sent as responses to the PostHog API survey **"Uchikomi Coach: after-session wish"**, so they show up under Surveys in PostHog.
+
 ## Using it on an iPhone
 
 1. Open the site in **Safari**, then Share → **Add to Home Screen**. This opens it full-screen and stops Safari wiping saved sessions after about 7 days of not visiting the site.
